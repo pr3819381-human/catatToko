@@ -1,0 +1,187 @@
+{
+  "store": {
+    "name": "Toko Berkah Jaya",
+    "type": "Kelontong & Sembako",
+    "status": "UMKM Aktif",
+    "plan": "PRO"
+  },
+
+  "dashboard": {
+    "balance": 18450000,
+    "netProfit": 14850000,
+    "profitPercentage": 18.2,
+    "todayIncome": 2450000,
+    "incomeTransactions": 28,
+    "averageTransaction": 87500,
+    "todayExpense": 820000,
+    "expenseEntries": 6
+  },
+
+  "transactions": [
+    {
+      "id": 1,
+      "title": "Top Up Saldo",
+      "type": "income",
+      "amount": 500000,
+      "date": "Hari ini",
+      "time": "08:30"
+    },
+    {
+      "id": 2,
+      "title": "Pembayaran PLN",
+      "type": "expense",
+      "amount": 250000,
+      "date": "Hari ini",
+      "time": "09:15"
+    },
+    {
+      "id": 3,
+      "title": "Transfer ke Sinta",
+      "type": "expense",
+      "amount": 150000,
+      "date": "Kemarin",
+      "time": "15:20"
+    },
+    {
+      "id": 4,
+      "title": "Menabung Dana Darurat",
+      "type": "saving",
+      "amount": 300000,
+      "date": "Kemarin",
+      "time": "11:45"
+    },
+    {
+      "id": 5,
+      "title": "Pulsa",
+      "type": "expense",
+      "amount": 50000,
+      "date": "2 hari lalu",
+      "time": "14:10"
+    }
+  ],
+
+  "stockAlert": {
+    "title": "Stok Menipis",
+    "description": "Ada beberapa produk yang perlu segera di-restock."
+  },
+
+  "paymentMethods": {
+    "cash": 62,
+    "qris": 28,
+    "transfer": 10
+  },
+
+    "products": [
+    {
+      "id": 1,
+      "name": "Beras 5 Kg",
+      "price": 75000,
+      "stock": 12,
+      "icon": "🍚"
+    },
+    {
+      "id": 2,
+      "name": "Minyak Goreng",
+      "price": 18000,
+      "stock": 20,
+      "icon": "🫗"
+    },
+    {
+      "id": 3,
+      "name": "Gula 1 Kg",
+      "price": 17000,
+      "stock": 15,
+      "icon": "🧂"
+    },
+    {
+      "id": 4,
+      "name": "Indomie Goreng",
+      "price": 3500,
+      "stock": 50,
+      "icon": "🍜"
+    },
+    {
+      "id": 5,
+      "name": "Telur 1 Kg",
+      "price": 29000,
+      "stock": 10,
+      "icon": "🥚"
+    },
+    {
+      "id": 6,
+      "name": "Teh Celup",
+      "price": 12000,
+      "stock": 18,
+      "icon": "🍵"
+    }
+  ],
+
+  "cashFlow": [
+    {
+      "day": "Sen",
+      "income": 1800000,
+      "expense": 600000
+    },
+    {
+      "day": "Sel",
+      "income": 2100000,
+      "expense": 750000
+    },
+    {
+      "day": "Rab",
+      "income": 1950000,
+      "expense": 500000
+    },
+    {
+      "day": "Kam",
+      "income": 2300000,
+      "expense": 900000
+    },
+    {
+      "day": "Jum",
+      "income": 2800000,
+      "expense": 700000
+    },
+    {
+      "day": "Sab",
+      "income": 2200000,
+      "expense": 650000
+    },
+    {
+      "day": "Min",
+      "income": 2450000,
+      "expense": 820000
+    }
+  ],
+
+  "expenseCategories": [
+    {
+      "id": 1,
+      "name": "Operasional",
+      "description": "Listrik, internet, dll.",
+      "amount": 320000,
+      "icon": "⚡"
+    },
+    {
+      "id": 2,
+      "name": "Stok Barang",
+      "description": "Pembelian produk",
+      "amount": 280000,
+      "icon": "📦"
+    },
+    {
+      "id": 3,
+      "name": "Transportasi",
+      "description": "Pengiriman dan perjalanan",
+      "amount": 150000,
+      "icon": "🚚"
+    },
+    {
+      "id": 4,
+      "name": "Lainnya",
+      "description": "Pengeluaran lainnya",
+      "amount": 70000,
+      "icon": "📱"
+    }
+  ]
+}
