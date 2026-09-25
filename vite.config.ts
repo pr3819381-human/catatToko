@@ -8,5 +8,9 @@ export default defineConfig({
     tailwindcss(),
   ],
 
-  base: '/catatToko/',
+  // GitHub Pages memakai /catatToko/,
+  // sedangkan Vercel memakai root /
+  base: process.env.VERCEL
+    ? '/'
+    : '/catatToko/',
 })
