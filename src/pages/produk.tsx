@@ -1,5 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
 import {
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+} from 'react'
+
+import {
+  DATA_CHANGED_EVENT,
   formatRupiah,
   getProducts,
   saveProducts,
@@ -17,25 +24,67 @@ type FormData = {
   icon: string
 }
 
-const emptyForm: FormData = {
+type StockFilter =
+  | 'all'
+  | 'available'
+  | 'low'
+  | 'empty'
+
+const EMPTY_FORM: FormData = {
   name: '',
   price: '',
   stock: '',
   icon: '📦',
 }
 
-function Produk({ onNavigate }: ProdukProps) {
-  const [products, setProducts] = useState<Product[]>([])
-  const [search, setSearch] = useState('')
-  const [showModal, setShowModal] = useState(false)
-  const [editingId, setEditingId] = useState<number | null>(null)
-  const [form, setForm] = useState<FormData>(emptyForm)
-  const [error, setError] = useState('')
-  const [showDeleteModal, setShowDeleteModal] =
+const ICONS = [
+  '📦',
+  '🍚',
+  '🫗',
+  '🍬',
+  '🍜',
+  '🥚',
+  '🍵',
+  '🥤',
+  '🧴',
+  '🧹',
+  '🧻',
+  '🧃',
+]
+
+function Produk({
+  onNavigate,
+}: ProdukProps) {
+  const [products, setProducts] =
+    useState<Product[]>([])
+
+  const [search, setSearch] =
+    useState('')
+
+  const [stockFilter, setStockFilter] =
+    useState<StockFilter>('all')
+
+  const [showModal, setShowModal] =
     useState(false)
-  const [deleteId, setDeleteId] = useState<number | null>(
-    null,
-  )
+
+  const [editingId, setEditingId] =
+    useState<number | null>(null)
+
+  const [form, setForm] =
+    useState<FormData>(EMPTY_FORM)
+
+  const [error, setError] =
+    useState('')
+
+  const [message, setMessage] =
+    useState('')
+
+  const [saving, setSaving] =
+    useState(false)
+
+  /* =========================================================
+     LOAD
+  ========================================================= */
 
   const loadProducts = () => {
     setProducts(getProducts())
@@ -44,97 +93,186 @@ function Produk({ onNavigate }: ProdukProps) {
   useEffect(() => {
     loadProducts()
 
-    const handleDataChanged = () => {
+    const handleChanged = () => {
       loadProducts()
     }
 
     window.addEventListener(
-      'catatTokoDataChanged',
-      handleDataChanged,
+      DATA_CHANGED_EVENT,
+      handleChanged,
     )
 
     return () => {
       window.removeEventListener(
-        'catatTokoDataChanged',
-        handleDataChanged,
+        DATA_CHANGED_EVENT,
+        handleChanged,
       )
     }
   }, [])
 
-  /*
-   * FILTER PRODUK
-   */
-  const filteredProducts = useMemo(() => {
-    const keyword = search.trim().toLowerCase()
+  /* =========================================================
+     FEEDBACK
+  ========================================================= */
 
-    if (!keyword) {
-      return products
+  useEffect(() => {
+    if (!message && !error) {
+      return
     }
 
-    return products.filter((product) =>
-      product.name.toLowerCase().includes(keyword),
+    const timer = window.setTimeout(() => {
+      setMessage('')
+      setError('')
+    }, 3500)
+
+    return () => {
+      window.clearTimeout(timer)
+    }
+  }, [message, error])
+
+  /* =========================================================
+     STATS
+  ========================================================= */
+
+  const totalProducts =
+    products.length
+
+  const totalStock =
+    products.reduce(
+      (total, product) =>
+        total + product.stock,
+      0,
     )
-  }, [products, search])
 
-  /*
-   * STATISTIK
-   */
-  const totalProducts = products.length
+  const lowStock =
+    products.filter(
+      (product) =>
+        product.stock > 0 &&
+        product.stock <= 5,
+    ).length
 
-  const totalStock = products.reduce(
-    (total, product) => total + product.stock,
-    0,
-  )
+  const emptyStock =
+    products.filter(
+      (product) =>
+        product.stock <= 0,
+    ).length
 
-  const lowStock = products.filter(
-    (product) => product.stock <= 10,
-  ).length
+  const inventoryValue =
+    products.reduce(
+      (total, product) =>
+        total +
+        product.price *
+          product.stock,
+      0,
+    )
 
-  const outOfStock = products.filter(
-    (product) => product.stock <= 0,
-  ).length
+  /* =========================================================
+     FILTER
+  ========================================================= */
 
-  /*
-   * BUKA TAMBAH
-   */
+  const filteredProducts =
+    useMemo(() => {
+      const keyword =
+        search
+          .trim()
+          .toLowerCase()
+
+      return products.filter(
+        (product) => {
+          const matchesSearch =
+            !keyword ||
+            product.name
+              .toLowerCase()
+              .includes(keyword)
+
+          if (
+            stockFilter ===
+            'available'
+          ) {
+            return (
+              matchesSearch &&
+              product.stock > 0
+            )
+          }
+
+          if (
+            stockFilter ===
+            'low'
+          ) {
+            return (
+              matchesSearch &&
+              product.stock > 0 &&
+              product.stock <= 5
+            )
+          }
+
+          if (
+            stockFilter ===
+            'empty'
+          ) {
+            return (
+              matchesSearch &&
+              product.stock <= 0
+            )
+          }
+
+          return matchesSearch
+        },
+      )
+    }, [
+      products,
+      search,
+      stockFilter,
+    ])
+
+  /* =========================================================
+     MODAL
+  ========================================================= */
+
   const openAddModal = () => {
     setEditingId(null)
-    setForm(emptyForm)
+    setForm({
+      ...EMPTY_FORM,
+    })
     setError('')
     setShowModal(true)
   }
 
-  /*
-   * BUKA EDIT
-   */
-  const openEditModal = (product: Product) => {
+  const openEditModal = (
+    product: Product,
+  ) => {
     setEditingId(product.id)
 
     setForm({
       name: product.name,
       price: String(product.price),
       stock: String(product.stock),
-      icon: product.icon || '📦',
+      icon:
+        product.icon ||
+        '📦',
     })
 
     setError('')
     setShowModal(true)
   }
 
-  /*
-   * TUTUP MODAL
-   */
   const closeModal = () => {
+    if (saving) {
+      return
+    }
+
     setShowModal(false)
     setEditingId(null)
-    setForm(emptyForm)
+    setForm({
+      ...EMPTY_FORM,
+    })
     setError('')
   }
 
-  /*
-   * HANDLE INPUT
-   */
-  const handleInput = (
+  /* =========================================================
+     FORM
+  ========================================================= */
+
+  const updateForm = (
     field: keyof FormData,
     value: string,
   ) => {
@@ -148,1393 +286,882 @@ function Produk({ onNavigate }: ProdukProps) {
     }
   }
 
-  /*
-   * SIMPAN PRODUK
-   */
-  const handleSubmit = () => {
-    const name = form.name.trim()
-    const price = Number(form.price)
-    const stock = Number(form.stock)
-    const icon = form.icon.trim() || '📦'
+  /* =========================================================
+     SAVE PRODUCT
+  ========================================================= */
 
-    if (!name) {
-      setError('Nama produk wajib diisi.')
+  const handleSubmit = (
+    event: FormEvent,
+  ) => {
+    event.preventDefault()
+
+    if (saving) {
       return
     }
 
-    if (!form.price || Number.isNaN(price) || price <= 0) {
-      setError('Harga produk harus lebih dari 0.')
+    const name =
+      form.name.trim()
+
+    const price =
+      Number(form.price)
+
+    const stock =
+      Number(form.stock)
+
+    if (!name) {
+      setError(
+        'Nama produk wajib diisi.',
+      )
       return
     }
 
     if (
-      form.stock === '' ||
-      Number.isNaN(stock) ||
-      stock < 0
+      !Number.isFinite(price) ||
+      price <= 0
     ) {
-      setError('Stok tidak boleh kurang dari 0.')
+      setError(
+        'Harga produk harus lebih dari 0.',
+      )
       return
     }
 
-    if (editingId !== null) {
-      const updatedProducts = products.map((product) =>
-        product.id === editingId
-          ? {
-              ...product,
-              name,
-              price,
-              stock,
-              icon,
-            }
-          : product,
+    if (
+      !Number.isInteger(stock) ||
+      stock < 0
+    ) {
+      setError(
+        'Stok harus berupa angka bulat 0 atau lebih.',
+      )
+      return
+    }
+
+    const duplicate =
+      products.some(
+        (product) =>
+          product.id !==
+            editingId &&
+          product.name
+            .trim()
+            .toLowerCase() ===
+            name.toLowerCase(),
       )
 
-      saveProducts(updatedProducts)
-    } else {
-      const newProduct: Product = {
-        id: Date.now(),
-        name,
-        price,
-        stock,
-        icon,
-      }
-
-      saveProducts([...products, newProduct])
+    if (duplicate) {
+      setError(
+        'Nama produk tersebut sudah ada.',
+      )
+      return
     }
 
-    closeModal()
-    loadProducts()
+    setSaving(true)
+
+    try {
+      if (editingId !== null) {
+        const updated =
+          products.map(
+            (product) =>
+              product.id ===
+              editingId
+                ? {
+                    ...product,
+                    name,
+                    price,
+                    stock,
+                    icon:
+                      form.icon ||
+                      '📦',
+                  }
+                : product,
+          )
+
+        saveProducts(updated)
+
+        setMessage(
+          'Produk berhasil diperbarui dan sedang disinkronkan.',
+        )
+      } else {
+        const newProduct: Product = {
+          id:
+            Date.now() +
+            Math.floor(
+              Math.random() *
+                1000,
+            ),
+          name,
+          price,
+          stock,
+          icon:
+            form.icon ||
+            '📦',
+        }
+
+        saveProducts([
+          ...products,
+          newProduct,
+        ])
+
+        setMessage(
+          'Produk berhasil ditambahkan dan sedang disinkronkan.',
+        )
+      }
+
+      loadProducts()
+      closeModal()
+    } catch (saveError) {
+      console.error(
+        'Gagal menyimpan produk:',
+        saveError,
+      )
+
+      setError(
+        'Produk gagal disimpan. Silakan coba lagi.',
+      )
+    } finally {
+      setSaving(false)
+    }
   }
 
-  /*
-   * BUKA DELETE
-   */
-  const openDeleteModal = (id: number) => {
-    setDeleteId(id)
-    setShowDeleteModal(true)
-  }
+  /* =========================================================
+     DELETE
+  ========================================================= */
 
-  /*
-   * TUTUP DELETE
-   */
-  const closeDeleteModal = () => {
-    setDeleteId(null)
-    setShowDeleteModal(false)
-  }
+  const deleteProduct = (
+    product: Product,
+  ) => {
+    if (saving) {
+      return
+    }
 
-  /*
-   * HAPUS PRODUK
-   */
-  const handleDelete = () => {
-    if (deleteId === null) return
+    const confirmed =
+      window.confirm(
+        `Hapus produk "${product.name}"? Produk akan hilang dari daftar kasir.`,
+      )
 
-    const updatedProducts = products.filter(
-      (product) => product.id !== deleteId,
+    if (!confirmed) {
+      return
+    }
+
+    saveProducts(
+      products.filter(
+        (item) =>
+          item.id !==
+          product.id,
+      ),
     )
 
-    saveProducts(updatedProducts)
+    setMessage(
+      'Produk berhasil dihapus dan sedang disinkronkan.',
+    )
 
-    closeDeleteModal()
     loadProducts()
   }
 
-  /*
-   * UPDATE STOK
-   */
-  const updateStock = (
-    product: Product,
+  /* =========================================================
+     QUICK STOCK
+  ========================================================= */
+
+  const changeStock = (
+    productId: number,
     amount: number,
   ) => {
-    const newStock = product.stock + amount
+    if (saving) {
+      return
+    }
 
-    if (newStock < 0) return
+    const product =
+      products.find(
+        (item) =>
+          item.id ===
+          productId,
+      )
 
-    const updatedProducts = products.map((item) =>
-      item.id === product.id
-        ? {
-            ...item,
-            stock: newStock,
-          }
-        : item,
+    if (!product) {
+      return
+    }
+
+    const nextStock =
+      Math.max(
+        0,
+        product.stock +
+          amount,
+      )
+
+    const updated =
+      products.map(
+        (item) =>
+          item.id ===
+          productId
+            ? {
+                ...item,
+                stock:
+                  nextStock,
+              }
+            : item,
+      )
+
+    saveProducts(updated)
+
+    setMessage(
+      amount > 0
+        ? 'Stok berhasil ditambah dan sedang disinkronkan.'
+        : 'Stok berhasil dikurangi dan sedang disinkronkan.',
     )
 
-    saveProducts(updatedProducts)
     loadProducts()
   }
 
-  /*
-   * STATUS STOK
-   */
-  const getStockStatus = (stock: number) => {
-    if (stock <= 0) {
-      return {
-        label: 'Habis',
-        color: '#dc2626',
-        background: '#fef2f2',
-      }
-    }
-
-    if (stock <= 10) {
-      return {
-        label: 'Menipis',
-        color: '#ea580c',
-        background: '#fff7ed',
-      }
-    }
-
-    return {
-      label: 'Aman',
-      color: '#059669',
-      background: '#ecfdf5',
-    }
-  }
+  /* =========================================================
+     PAGE
+  ========================================================= */
 
   return (
-    <>
-      <style>{`
-        .produk-page {
-          min-height: 100vh;
-          padding: 30px;
-          background:
-            radial-gradient(
-              circle at top right,
-              rgba(37, 99, 235, 0.07),
-              transparent 28%
-            ),
-            #f8fafc;
-          color: #0f172a;
-        }
-
-        .produk-container {
-          width: 100%;
-          max-width: 1500px;
-          margin: 0 auto;
-        }
-
-        .produk-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 20px;
-          margin-bottom: 25px;
-        }
-
-        .back-button {
-          width: 40px;
-          height: 40px;
-          display: grid;
-          place-items: center;
-          border: 1px solid #e2e8f0;
-          border-radius: 12px;
-          background: #ffffff;
-          color: #475569;
-          cursor: pointer;
-          font-size: 16px;
-          transition: 0.2s ease;
-        }
-
-        .back-button:hover {
-          transform: translateX(-2px);
-          border-color: #bfdbfe;
-          background: #eff6ff;
-          color: #2563eb;
-        }
-
-        .header-left {
-          display: flex;
-          align-items: center;
-          gap: 13px;
-          min-width: 0;
-        }
-
-        .page-title {
-          margin: 0;
-          font-size: 28px;
-          font-weight: 900;
-          letter-spacing: -0.035em;
-        }
-
-        .page-subtitle {
-          margin: 5px 0 0;
-          color: #64748b;
-          font-size: 12px;
-        }
-
-        .primary-button {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          gap: 8px;
-          min-height: 42px;
-          padding: 0 17px;
-          border: none;
-          border-radius: 12px;
-          background: linear-gradient(
-            135deg,
-            #2563eb,
-            #4f46e5
-          );
-          color: #ffffff;
-          cursor: pointer;
-          font-size: 11px;
-          font-weight: 850;
-          box-shadow:
-            0 8px 20px rgba(37, 99, 235, 0.18);
-          transition: 0.2s ease;
-        }
-
-        .primary-button:hover {
-          transform: translateY(-1px);
-          box-shadow:
-            0 12px 25px rgba(37, 99, 235, 0.23);
-        }
-
-        .stats-grid {
-          display: grid;
-          grid-template-columns:
-            repeat(4, minmax(0, 1fr));
-          gap: 15px;
-          margin-bottom: 20px;
-        }
-
-        .stat-card {
-          padding: 18px;
-          border: 1px solid #e2e8f0;
-          border-radius: 17px;
-          background: #ffffff;
-          box-shadow:
-            0 8px 24px rgba(15, 23, 42, 0.04);
-        }
-
-        .stat-label {
-          margin: 0;
-          color: #64748b;
-          font-size: 10px;
-          font-weight: 750;
-        }
-
-        .stat-value {
-          margin: 8px 0 0;
-          color: #0f172a;
-          font-size: 22px;
-          font-weight: 900;
-          letter-spacing: -0.03em;
-        }
-
-        .stat-description {
-          margin: 5px 0 0;
-          color: #94a3b8;
-          font-size: 9px;
-        }
-
-        .products-panel {
-          overflow: hidden;
-          border: 1px solid #e2e8f0;
-          border-radius: 20px;
-          background: #ffffff;
-          box-shadow:
-            0 8px 25px rgba(15, 23, 42, 0.045);
-        }
-
-        .toolbar {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 15px;
-          padding: 18px 20px;
-          border-bottom: 1px solid #f1f5f9;
-        }
-
-        .toolbar-title {
-          margin: 0;
-          font-size: 14px;
-          font-weight: 850;
-        }
-
-        .toolbar-count {
-          margin: 4px 0 0;
-          color: #94a3b8;
-          font-size: 9px;
-        }
-
-        .search-input {
-          width: 270px;
-          height: 40px;
-          padding: 0 13px;
-          border: 1px solid #e2e8f0;
-          outline: none;
-          border-radius: 11px;
-          background: #f8fafc;
-          color: #0f172a;
-          font-size: 11px;
-          transition: 0.2s ease;
-        }
-
-        .search-input:focus {
-          border-color: #93c5fd;
-          background: #ffffff;
-          box-shadow:
-            0 0 0 4px rgba(37, 99, 235, 0.07);
-        }
-
-        .table-wrapper {
-          width: 100%;
-          overflow-x: auto;
-        }
-
-        .product-table {
-          width: 100%;
-          min-width: 750px;
-          border-collapse: collapse;
-        }
-
-        .product-table th {
-          padding: 12px 20px;
-          border-bottom: 1px solid #f1f5f9;
-          color: #94a3b8;
-          font-size: 9px;
-          font-weight: 800;
-          text-align: left;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-        }
-
-        .product-table td {
-          padding: 15px 20px;
-          border-bottom: 1px solid #f1f5f9;
-          vertical-align: middle;
-        }
-
-        .product-table tr:last-child td {
-          border-bottom: none;
-        }
-
-        .product-table tbody tr {
-          transition: 0.18s ease;
-        }
-
-        .product-table tbody tr:hover {
-          background: #fafcff;
-        }
-
-        .product-info {
-          display: flex;
-          align-items: center;
-          gap: 11px;
-        }
-
-        .product-icon {
-          width: 42px;
-          height: 42px;
-          flex: 0 0 42px;
-          display: grid;
-          place-items: center;
-          border-radius: 12px;
-          background: #eff6ff;
-          font-size: 19px;
-        }
-
-        .product-name {
-          margin: 0;
-          color: #1e293b;
-          font-size: 11px;
-          font-weight: 850;
-        }
-
-        .product-id {
-          margin: 3px 0 0;
-          color: #94a3b8;
-          font-size: 8px;
-        }
-
-        .price-text {
-          color: #1e293b;
-          font-size: 11px;
-          font-weight: 800;
-        }
-
-        .stock-control {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-
-        .stock-button {
-          width: 27px;
-          height: 27px;
-          display: grid;
-          place-items: center;
-          border: 1px solid #e2e8f0;
-          border-radius: 8px;
-          background: #ffffff;
-          color: #475569;
-          cursor: pointer;
-          font-size: 13px;
-          font-weight: 800;
-        }
-
-        .stock-button:hover {
-          border-color: #bfdbfe;
-          background: #eff6ff;
-          color: #2563eb;
-        }
-
-        .stock-number {
-          min-width: 35px;
-          color: #0f172a;
-          font-size: 11px;
-          font-weight: 900;
-          text-align: center;
-        }
-
-        .stock-badge {
-          display: inline-flex;
-          align-items: center;
-          padding: 5px 8px;
-          border-radius: 99px;
-          font-size: 8px;
-          font-weight: 900;
-        }
-
-        .action-group {
-          display: flex;
-          align-items: center;
-          gap: 7px;
-        }
-
-        .action-button {
-          width: 31px;
-          height: 31px;
-          display: grid;
-          place-items: center;
-          border: 1px solid #e2e8f0;
-          border-radius: 9px;
-          background: #ffffff;
-          cursor: pointer;
-          font-size: 12px;
-          transition: 0.18s ease;
-        }
-
-        .edit-button {
-          color: #2563eb;
-        }
-
-        .edit-button:hover {
-          border-color: #bfdbfe;
-          background: #eff6ff;
-        }
-
-        .delete-button {
-          color: #dc2626;
-        }
-
-        .delete-button:hover {
-          border-color: #fecaca;
-          background: #fef2f2;
-        }
-
-        .empty-state {
-          padding: 60px 20px;
-          text-align: center;
-        }
-
-        .empty-icon {
-          width: 55px;
-          height: 55px;
-          display: grid;
-          place-items: center;
-          margin: 0 auto 12px;
-          border-radius: 16px;
-          background: #eff6ff;
-          font-size: 24px;
-        }
-
-        .empty-title {
-          margin: 0;
-          color: #334155;
-          font-size: 13px;
-          font-weight: 850;
-        }
-
-        .empty-text {
-          margin: 5px 0 0;
-          color: #94a3b8;
-          font-size: 10px;
-        }
-
-        /*
-         * MODAL
-         */
-
-        .modal-overlay {
-          position: fixed;
-          z-index: 500;
-          inset: 0;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          padding: 20px;
-          background: rgba(15, 23, 42, 0.52);
-          backdrop-filter: blur(7px);
-        }
-
-        .modal-card {
-          width: 100%;
-          max-width: 470px;
-          max-height: calc(100vh - 40px);
-          overflow-y: auto;
-          border: 1px solid rgba(255,255,255,0.7);
-          border-radius: 21px;
-          background: #ffffff;
-          box-shadow:
-            0 30px 80px rgba(15, 23, 42, 0.25);
-          animation: modalIn 0.18s ease;
-        }
-
-        @keyframes modalIn {
-          from {
-            opacity: 0;
-            transform: translateY(10px) scale(0.98);
-          }
-
-          to {
-            opacity: 1;
-            transform: translateY(0) scale(1);
-          }
-        }
-
-        .modal-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 15px;
-          padding: 20px;
-          border-bottom: 1px solid #f1f5f9;
-        }
-
-        .modal-title {
-          margin: 0;
-          font-size: 17px;
-          font-weight: 900;
-        }
-
-        .modal-subtitle {
-          margin: 4px 0 0;
-          color: #94a3b8;
-          font-size: 9px;
-        }
-
-        .close-button {
-          width: 32px;
-          height: 32px;
-          display: grid;
-          place-items: center;
-          border: none;
-          border-radius: 9px;
-          background: #f8fafc;
-          color: #64748b;
-          cursor: pointer;
-          font-size: 15px;
-        }
-
-        .close-button:hover {
-          background: #f1f5f9;
-          color: #0f172a;
-        }
-
-        .modal-body {
-          padding: 20px;
-        }
-
-        .form-group {
-          margin-bottom: 15px;
-        }
-
-        .form-label {
-          display: block;
-          margin-bottom: 6px;
-          color: #334155;
-          font-size: 10px;
-          font-weight: 850;
-        }
-
-        .form-input {
-          width: 100%;
-          height: 42px;
-          box-sizing: border-box;
-          padding: 0 12px;
-          border: 1px solid #e2e8f0;
-          outline: none;
-          border-radius: 11px;
-          background: #f8fafc;
-          color: #0f172a;
-          font-size: 11px;
-        }
-
-        .form-input:focus {
-          border-color: #93c5fd;
-          background: #ffffff;
-          box-shadow:
-            0 0 0 4px rgba(37, 99, 235, 0.07);
-        }
-
-        .form-row {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 12px;
-        }
-
-        .emoji-row {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 7px;
-          margin-top: 7px;
-        }
-
-        .emoji-button {
-          width: 35px;
-          height: 35px;
-          display: grid;
-          place-items: center;
-          border: 1px solid #e2e8f0;
-          border-radius: 9px;
-          background: #ffffff;
-          cursor: pointer;
-          font-size: 17px;
-        }
-
-        .emoji-button:hover,
-        .emoji-button.selected {
-          border-color: #93c5fd;
-          background: #eff6ff;
-        }
-
-        .error-message {
-          margin-bottom: 13px;
-          padding: 10px 12px;
-          border: 1px solid #fecaca;
-          border-radius: 10px;
-          background: #fef2f2;
-          color: #dc2626;
-          font-size: 10px;
-          font-weight: 750;
-        }
-
-        .modal-footer {
-          display: flex;
-          justify-content: flex-end;
-          gap: 8px;
-          padding: 15px 20px 20px;
-        }
-
-        .secondary-button {
-          min-height: 40px;
-          padding: 0 15px;
-          border: 1px solid #e2e8f0;
-          border-radius: 11px;
-          background: #ffffff;
-          color: #64748b;
-          cursor: pointer;
-          font-size: 10px;
-          font-weight: 800;
-        }
-
-        .secondary-button:hover {
-          background: #f8fafc;
-        }
-
-        /*
-         * DELETE MODAL
-         */
-
-        .delete-card {
-          width: 100%;
-          max-width: 380px;
-          padding: 25px;
-          border-radius: 20px;
-          background: #ffffff;
-          text-align: center;
-          box-shadow:
-            0 30px 80px rgba(15, 23, 42, 0.25);
-          animation: modalIn 0.18s ease;
-        }
-
-        .delete-icon {
-          width: 52px;
-          height: 52px;
-          display: grid;
-          place-items: center;
-          margin: 0 auto 13px;
-          border-radius: 15px;
-          background: #fef2f2;
-          font-size: 22px;
-        }
-
-        .delete-title {
-          margin: 0;
-          font-size: 16px;
-          font-weight: 900;
-        }
-
-        .delete-text {
-          margin: 7px 0 20px;
-          color: #64748b;
-          font-size: 10px;
-          line-height: 1.6;
-        }
-
-        .delete-actions {
-          display: flex;
-          gap: 8px;
-        }
-
-        .delete-confirm {
-          flex: 1;
-          min-height: 40px;
-          border: none;
-          border-radius: 11px;
-          background: #dc2626;
-          color: #ffffff;
-          cursor: pointer;
-          font-size: 10px;
-          font-weight: 850;
-        }
-
-        .delete-confirm:hover {
-          background: #b91c1c;
-        }
-
-        .delete-cancel {
-          flex: 1;
-          min-height: 40px;
-          border: 1px solid #e2e8f0;
-          border-radius: 11px;
-          background: #ffffff;
-          color: #64748b;
-          cursor: pointer;
-          font-size: 10px;
-          font-weight: 800;
-        }
-
-        @media (max-width: 1000px) {
-          .stats-grid {
-            grid-template-columns:
-              repeat(2, minmax(0, 1fr));
-          }
-        }
-
-        @media (max-width: 700px) {
-          .produk-page {
-            padding: 20px 14px 90px;
-          }
-
-          .produk-header {
-            align-items: flex-start;
-          }
-
-          .page-title {
-            font-size: 23px;
-          }
-
-          .primary-button {
-            min-height: 39px;
-            padding: 0 12px;
-          }
-
-          .toolbar {
-            align-items: stretch;
-            flex-direction: column;
-          }
-
-          .search-input {
-            width: 100%;
-          }
-        }
-
-        @media (max-width: 480px) {
-          .produk-page {
-            padding-left: 10px;
-            padding-right: 10px;
-          }
-
-          .stats-grid {
-            gap: 9px;
-          }
-
-          .stat-card {
-            padding: 13px;
-          }
-
-          .stat-value {
-            font-size: 17px;
-          }
-
-          .stat-label {
-            font-size: 8px;
-          }
-
-          .stat-description {
-            font-size: 7px;
-          }
-
-          .header-left {
-            gap: 8px;
-          }
-
-          .back-button {
-            width: 36px;
-            height: 36px;
-          }
-
-          .page-title {
-            font-size: 20px;
-          }
-
-          .page-subtitle {
-            font-size: 9px;
-          }
-
-          .primary-button {
-            width: 42px;
-            padding: 0;
-            font-size: 0;
-          }
-
-          .primary-button::before {
-            content: '+';
-            font-size: 20px;
-          }
-
-          .form-row {
-            grid-template-columns: 1fr;
-          }
-        }
-      `}</style>
-
-      <main className="produk-page">
-        <div className="produk-container">
-
-          {/* HEADER */}
-          <header className="produk-header">
-            <div className="header-left">
-              <button
-                className="back-button"
-                onClick={() =>
-                  onNavigate?.('dashboard')
-                }
-              >
-                ←
-              </button>
-
-              <div>
-                <h1 className="page-title">
-                  Produk
-                </h1>
-
-                <p className="page-subtitle">
-                  Kelola produk dan stok Toko Berkah Jaya.
-                </p>
-              </div>
+    <div className="min-h-full bg-slate-50 pb-10">
+      {/* HEADER */}
+
+      <header className="bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 px-5 pb-7 pt-8 text-white sm:px-7">
+        <div className="mx-auto w-full max-w-6xl">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-300">
+                CATATTOKO • INVENTORY
+              </p>
+
+              <h1 className="mt-2 text-2xl font-black tracking-tight sm:text-3xl">
+                Produk & Stok
+              </h1>
+
+              <p className="mt-1 max-w-md text-xs leading-5 text-slate-400">
+                Kelola barang toko yang
+                nantinya digunakan langsung
+                oleh kasir.
+              </p>
             </div>
 
             <button
-              className="primary-button"
+              type="button"
               onClick={openAddModal}
+              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-2xl font-light text-white shadow-lg shadow-blue-600/25 transition hover:bg-blue-500"
+              aria-label="Tambah produk"
             >
-              + Tambah Produk
+              +
             </button>
-          </header>
+          </div>
 
-          {/* STATS */}
-          <section className="stats-grid">
+          {/* SEARCH */}
 
-            <article className="stat-card">
-              <p className="stat-label">
-                TOTAL PRODUK
-              </p>
+          <div className="mt-6 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 backdrop-blur">
+            <span className="text-lg">
+              🔎
+            </span>
 
-              <p className="stat-value">
-                {totalProducts}
-              </p>
+            <input
+              type="search"
+              value={search}
+              onChange={(event) =>
+                setSearch(
+                  event.target.value,
+                )
+              }
+              placeholder="Cari produk..."
+              className="w-full bg-transparent text-sm font-semibold text-white outline-none placeholder:text-slate-500"
+            />
 
-              <p className="stat-description">
-                Produk terdaftar
-              </p>
-            </article>
-
-            <article className="stat-card">
-              <p className="stat-label">
-                TOTAL STOK
-              </p>
-
-              <p className="stat-value">
-                {totalStock}
-              </p>
-
-              <p className="stat-description">
-                Semua barang
-              </p>
-            </article>
-
-            <article className="stat-card">
-              <p className="stat-label">
-                STOK MENIPIS
-              </p>
-
-              <p
-                className="stat-value"
-                style={{
-                  color:
-                    lowStock > 0
-                      ? '#ea580c'
-                      : '#059669',
-                }}
-              >
-                {lowStock}
-              </p>
-
-              <p className="stat-description">
-                Stok ≤ 10
-              </p>
-            </article>
-
-            <article className="stat-card">
-              <p className="stat-label">
-                STOK HABIS
-              </p>
-
-              <p
-                className="stat-value"
-                style={{
-                  color:
-                    outOfStock > 0
-                      ? '#dc2626'
-                      : '#059669',
-                }}
-              >
-                {outOfStock}
-              </p>
-
-              <p className="stat-description">
-                Perlu restock
-              </p>
-            </article>
-
-          </section>
-
-          {/* PRODUCT PANEL */}
-          <section className="products-panel">
-
-            <div className="toolbar">
-              <div>
-                <h2 className="toolbar-title">
-                  Daftar Produk
-                </h2>
-
-                <p className="toolbar-count">
-                  Menampilkan {filteredProducts.length}{' '}
-                  dari {products.length} produk
-                </p>
-              </div>
-
-              <input
-                className="search-input"
-                value={search}
-                onChange={(event) =>
-                  setSearch(event.target.value)
+            {search && (
+              <button
+                type="button"
+                onClick={() =>
+                  setSearch('')
                 }
-                placeholder="🔎 Cari nama produk..."
-              />
+                className="text-lg text-slate-400 hover:text-white"
+                aria-label="Hapus pencarian"
+              >
+                ×
+              </button>
+            )}
+          </div>
+        </div>
+      </header>
+
+      <main className="mx-auto w-full max-w-6xl px-5 sm:px-7">
+        {/* FEEDBACK */}
+
+        {message && (
+          <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700">
+            ✓ {message}
+          </div>
+        )}
+
+        {error && !showModal && (
+          <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-600">
+            {error}
+          </div>
+        )}
+
+        {/* STATS */}
+
+        <section className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
+            <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+              Produk
+            </p>
+
+            <p className="mt-2 text-2xl font-black text-slate-900">
+              {totalProducts}
+            </p>
+
+            <p className="mt-1 text-[10px] font-semibold text-slate-400">
+              terdaftar
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
+            <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+              Total Stok
+            </p>
+
+            <p className="mt-2 text-2xl font-black text-slate-900">
+              {totalStock}
+            </p>
+
+            <p className="mt-1 text-[10px] font-semibold text-slate-400">
+              unit barang
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-amber-100 bg-amber-50 p-4 shadow-sm">
+            <p className="text-[10px] font-black uppercase tracking-wider text-amber-500">
+              Stok Menipis
+            </p>
+
+            <p className="mt-2 text-2xl font-black text-amber-700">
+              {lowStock}
+            </p>
+
+            <p className="mt-1 text-[10px] font-semibold text-amber-500">
+              perlu diperhatikan
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-red-100 bg-red-50 p-4 shadow-sm">
+            <p className="text-[10px] font-black uppercase tracking-wider text-red-400">
+              Stok Habis
+            </p>
+
+            <p className="mt-2 text-2xl font-black text-red-600">
+              {emptyStock}
+            </p>
+
+            <p className="mt-1 text-[10px] font-semibold text-red-400">
+              tidak tersedia
+            </p>
+          </div>
+        </section>
+
+        {/* INVENTORY VALUE */}
+
+        <section className="mt-4 rounded-3xl border border-blue-100 bg-gradient-to-br from-blue-50 to-indigo-50 p-5">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.15em] text-blue-500">
+                Nilai Persediaan
+              </p>
+
+              <p className="mt-2 text-xl font-black tracking-tight text-slate-900">
+                {formatRupiah(
+                  inventoryValue,
+                )}
+              </p>
+
+              <p className="mt-1 text-[11px] font-medium text-slate-500">
+                Estimasi harga jual seluruh
+                stok yang tersedia.
+              </p>
             </div>
 
-            {filteredProducts.length === 0 ? (
-              <div className="empty-state">
-                <div className="empty-icon">
-                  📦
-                </div>
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white text-xl shadow-sm">
+              📦
+            </div>
+          </div>
+        </section>
 
-                <h3 className="empty-title">
-                  {search
-                    ? 'Produk tidak ditemukan'
-                    : 'Belum ada produk'}
-                </h3>
+        {/* FILTER */}
 
-                <p className="empty-text">
-                  {search
-                    ? 'Coba gunakan kata kunci lain.'
-                    : 'Klik Tambah Produk untuk membuat produk baru.'}
-                </p>
+        <section className="mt-6">
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {(
+              [
+                ['all', 'Semua'],
+                ['available', 'Tersedia'],
+                ['low', 'Menipis'],
+                ['empty', 'Habis'],
+              ] as [
+                StockFilter,
+                string,
+              ][]
+            ).map(
+              ([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() =>
+                    setStockFilter(
+                      value,
+                    )
+                  }
+                  className={`shrink-0 rounded-xl px-4 py-2.5 text-xs font-black transition ${
+                    stockFilter ===
+                    value
+                      ? 'bg-slate-950 text-white shadow-md'
+                      : 'bg-white text-slate-400 ring-1 ring-slate-100 hover:text-slate-700'
+                  }`}
+                >
+                  {label}
+                </button>
+              ),
+            )}
+          </div>
+        </section>
+
+        {/* PRODUCTS */}
+
+        <section className="mt-5">
+          {filteredProducts.length ===
+          0 ? (
+            <div className="rounded-3xl border border-dashed border-slate-200 bg-white p-10 text-center">
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-50 text-3xl">
+                📦
               </div>
-            ) : (
-              <div className="table-wrapper">
-                <table className="product-table">
-                  <thead>
-                    <tr>
-                      <th>Produk</th>
-                      <th>Harga</th>
-                      <th>Stok</th>
-                      <th>Status</th>
-                      <th>Aksi</th>
-                    </tr>
-                  </thead>
 
-                  <tbody>
-                    {filteredProducts.map(
-                      (product) => {
-                        const stockStatus =
-                          getStockStatus(
-                            product.stock,
-                          )
+              <h2 className="mt-4 text-base font-black text-slate-800">
+                Belum ada produk
+              </h2>
 
-                        return (
-                          <tr key={product.id}>
+              <p className="mx-auto mt-1 max-w-xs text-xs leading-5 text-slate-400">
+                Tambahkan produk agar barang
+                bisa langsung dipilih dari
+                halaman kasir.
+              </p>
 
-                            <td>
-                              <div className="product-info">
-                                <div className="product-icon">
-                                  {product.icon}
-                                </div>
+              <button
+                type="button"
+                onClick={
+                  openAddModal
+                }
+                className="mt-5 rounded-xl bg-blue-600 px-5 py-3 text-xs font-black text-white shadow-lg shadow-blue-500/20 hover:bg-blue-700"
+              >
+                + Tambah Produk
+              </button>
+            </div>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {filteredProducts.map(
+                (product) => {
+                  const isEmpty =
+                    product.stock <=
+                    0
 
-                                <div>
-                                  <p className="product-name">
-                                    {product.name}
-                                  </p>
+                  const isLow =
+                    product.stock >
+                      0 &&
+                    product.stock <=
+                      5
 
-                                  <p className="product-id">
-                                    ID #{product.id}
-                                  </p>
-                                </div>
-                              </div>
-                            </td>
+                  return (
+                    <article
+                      key={product.id}
+                      className="rounded-3xl border border-slate-100 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg hover:shadow-slate-900/5"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-slate-50 text-2xl">
+                          {product.icon ||
+                            '📦'}
+                        </div>
 
-                            <td>
-                              <span className="price-text">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <h2 className="truncate text-sm font-black text-slate-800">
+                                {product.name}
+                              </h2>
+
+                              <p className="mt-1 text-sm font-black text-blue-600">
                                 {formatRupiah(
                                   product.price,
                                 )}
+                              </p>
+                            </div>
+
+                            <span
+                              className={`shrink-0 rounded-lg px-2 py-1 text-[9px] font-black ${
+                                isEmpty
+                                  ? 'bg-red-50 text-red-500'
+                                  : isLow
+                                    ? 'bg-amber-50 text-amber-600'
+                                    : 'bg-emerald-50 text-emerald-600'
+                              }`}
+                            >
+                              {isEmpty
+                                ? 'HABIS'
+                                : isLow
+                                  ? 'MENIPIS'
+                                  : 'AMAN'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* STOCK */}
+
+                      <div className="mt-5 rounded-2xl bg-slate-50 p-3">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-[10px] font-bold text-slate-400">
+                              Stok sekarang
+                            </p>
+
+                            <p className="mt-1 text-lg font-black text-slate-900">
+                              {product.stock}{' '}
+                              <span className="text-[10px] font-bold text-slate-400">
+                                unit
                               </span>
-                            </td>
+                            </p>
+                          </div>
 
-                            <td>
-                              <div className="stock-control">
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                changeStock(
+                                  product.id,
+                                  -1,
+                                )
+                              }
+                              disabled={
+                                product.stock <=
+                                  0 ||
+                                saving
+                              }
+                              className="flex h-9 w-9 items-center justify-center rounded-xl bg-white text-lg font-black text-slate-600 shadow-sm disabled:cursor-not-allowed disabled:opacity-30"
+                              aria-label={`Kurangi stok ${product.name}`}
+                            >
+                              −
+                            </button>
 
-                                <button
-                                  className="stock-button"
-                                  onClick={() =>
-                                    updateStock(
-                                      product,
-                                      -1,
-                                    )
-                                  }
-                                >
-                                  −
-                                </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                changeStock(
+                                  product.id,
+                                  1,
+                                )
+                              }
+                              disabled={saving}
+                              className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 text-lg font-black text-white shadow-sm shadow-blue-500/20 disabled:opacity-50"
+                              aria-label={`Tambah stok ${product.name}`}
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+                      </div>
 
-                                <span className="stock-number">
-                                  {product.stock}
-                                </span>
+                      {/* CLOUD STATUS */}
 
-                                <button
-                                  className="stock-button"
-                                  onClick={() =>
-                                    updateStock(
-                                      product,
-                                      1,
-                                    )
-                                  }
-                                >
-                                  +
-                                </button>
+                      <div className="mt-3 flex items-center gap-2">
+                        <span
+                          className={`h-1.5 w-1.5 rounded-full ${
+                            product.cloudId
+                              ? 'bg-emerald-500'
+                              : 'bg-amber-400'
+                          }`}
+                        />
 
-                              </div>
-                            </td>
+                        <span className="text-[9px] font-bold text-slate-400">
+                          {product.cloudId
+                            ? 'Tersinkron'
+                            : 'Menunggu sinkronisasi'}
+                        </span>
+                      </div>
 
-                            <td>
-                              <span
-                                className="stock-badge"
-                                style={{
-                                  color:
-                                    stockStatus.color,
-                                  background:
-                                    stockStatus.background,
-                                }}
-                              >
-                                {stockStatus.label}
-                              </span>
-                            </td>
+                      {/* ACTIONS */}
 
-                            <td>
-                              <div className="action-group">
+                      <div className="mt-4 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            openEditModal(
+                              product,
+                            )
+                          }
+                          disabled={saving}
+                          className="flex-1 rounded-xl bg-slate-100 px-3 py-2.5 text-xs font-black text-slate-600 transition hover:bg-slate-200 disabled:opacity-50"
+                        >
+                          Edit
+                        </button>
 
-                                <button
-                                  className="action-button edit-button"
-                                  onClick={() =>
-                                    openEditModal(
-                                      product,
-                                    )
-                                  }
-                                  title="Edit produk"
-                                >
-                                  ✎
-                                </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            deleteProduct(
+                              product,
+                            )
+                          }
+                          disabled={saving}
+                          className="rounded-xl bg-red-50 px-4 py-2.5 text-xs font-black text-red-500 transition hover:bg-red-100 disabled:opacity-50"
+                        >
+                          Hapus
+                        </button>
+                      </div>
+                    </article>
+                  )
+                },
+              )}
+            </div>
+          )}
+        </section>
 
-                                <button
-                                  className="action-button delete-button"
-                                  onClick={() =>
-                                    openDeleteModal(
-                                      product.id,
-                                    )
-                                  }
-                                  title="Hapus produk"
-                                >
-                                  🗑
-                                </button>
+        {/* INFO */}
 
-                              </div>
-                            </td>
+        <section className="mt-6 rounded-3xl border border-slate-100 bg-white p-5 shadow-sm">
+          <div className="flex gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50">
+              💡
+            </div>
 
-                          </tr>
-                        )
-                      },
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            <div>
+              <h3 className="text-sm font-black text-slate-800">
+                Terhubung dengan Kasir
+              </h3>
 
-          </section>
+              <p className="mt-1 text-xs leading-5 text-slate-400">
+                Produk yang dibuat di sini
+                otomatis tersedia di halaman
+                Kasir. Saat barang terjual,
+                stok akan berkurang otomatis
+                dan transaksi pemasukan akan
+                tercatat di Firebase.
+              </p>
 
-        </div>
+              {onNavigate && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    onNavigate(
+                      'sales',
+                    )
+                  }
+                  className="mt-3 text-xs font-black text-blue-600 hover:text-blue-700"
+                >
+                  Buka Kasir →
+                </button>
+              )}
+            </div>
+          </div>
+        </section>
       </main>
 
-      {/* ADD / EDIT MODAL */}
-      {showModal && (
-        <div
-          className="modal-overlay"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
-              closeModal()
-            }
-          }}
-        >
-          <div className="modal-card">
+      {/* MODAL */}
 
-            <div className="modal-header">
+      {showModal && (
+        <div className="fixed inset-0 z-[1300] flex items-end justify-center bg-slate-950/50 p-0 backdrop-blur-sm sm:items-center sm:p-5">
+          <div className="max-h-[92dvh] w-full max-w-lg overflow-y-auto rounded-t-[32px] bg-white p-5 shadow-2xl sm:rounded-[28px]">
+            <div className="mx-auto mb-5 h-1.5 w-12 rounded-full bg-slate-200 sm:hidden" />
+
+            <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="modal-title">
+                <p className="text-[10px] font-black uppercase tracking-[0.16em] text-blue-500">
+                  {editingId !== null
+                    ? 'EDIT PRODUK'
+                    : 'PRODUK BARU'}
+                </p>
+
+                <h2 className="mt-1 text-xl font-black tracking-tight text-slate-900">
                   {editingId !== null
                     ? 'Edit Produk'
                     : 'Tambah Produk'}
                 </h2>
-
-                <p className="modal-subtitle">
-                  Isi informasi produk dengan lengkap.
-                </p>
               </div>
 
               <button
-                className="close-button"
+                type="button"
                 onClick={closeModal}
+                disabled={saving}
+                className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-xl text-slate-500 hover:bg-slate-200 disabled:opacity-40"
+                aria-label="Tutup"
               >
                 ×
               </button>
             </div>
 
-            <div className="modal-body">
+            <form
+              onSubmit={handleSubmit}
+              className="mt-6 space-y-4"
+            >
+              {/* PREVIEW */}
 
-              {error && (
-                <div className="error-message">
-                  ⚠ {error}
+              <div className="flex items-center gap-3 rounded-2xl bg-slate-50 p-4">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white text-2xl shadow-sm">
+                  {form.icon ||
+                    '📦'}
                 </div>
-              )}
 
-              {/* NAMA */}
-              <div className="form-group">
-                <label className="form-label">
-                  Nama Produk
-                </label>
+                <div>
+                  <p className="text-sm font-black text-slate-800">
+                    {form.name ||
+                      'Nama Produk'}
+                  </p>
+
+                  <p className="mt-1 text-xs font-semibold text-slate-400">
+                    {form.price
+                      ? formatRupiah(
+                          Number(
+                            form.price,
+                          ),
+                        )
+                      : 'Rp0'}
+                  </p>
+                </div>
+              </div>
+
+              {/* NAME */}
+
+              <label className="block">
+                <span className="mb-2 block text-xs font-black text-slate-600">
+                  Nama produk
+                </span>
 
                 <input
-                  className="form-input"
+                  type="text"
                   value={form.name}
                   onChange={(event) =>
-                    handleInput(
+                    updateForm(
                       'name',
                       event.target.value,
                     )
                   }
                   placeholder="Contoh: Beras 5 Kg"
+                  disabled={saving}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3.5 text-sm font-semibold text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:bg-slate-50"
                 />
-              </div>
+              </label>
 
-              {/* HARGA + STOK */}
-              <div className="form-row">
+              {/* PRICE / STOCK */}
 
-                <div className="form-group">
-                  <label className="form-label">
-                    Harga
-                  </label>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block">
+                  <span className="mb-2 block text-xs font-black text-slate-600">
+                    Harga jual
+                  </span>
 
                   <input
-                    className="form-input"
                     type="number"
-                    min="0"
+                    min="1"
                     value={form.price}
                     onChange={(event) =>
-                      handleInput(
+                      updateForm(
                         'price',
                         event.target.value,
                       )
                     }
                     placeholder="75000"
+                    disabled={saving}
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3.5 text-sm font-semibold text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:bg-slate-50"
                   />
-                </div>
+                </label>
 
-                <div className="form-group">
-                  <label className="form-label">
-                    Stok
-                  </label>
+                <label className="block">
+                  <span className="mb-2 block text-xs font-black text-slate-600">
+                    Stok awal
+                  </span>
 
                   <input
-                    className="form-input"
                     type="number"
                     min="0"
+                    step="1"
                     value={form.stock}
                     onChange={(event) =>
-                      handleInput(
+                      updateForm(
                         'stock',
                         event.target.value,
                       )
                     }
                     placeholder="10"
+                    disabled={saving}
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3.5 text-sm font-semibold text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:bg-slate-50"
                   />
-                </div>
-
+                </label>
               </div>
 
               {/* ICON */}
-              <div className="form-group">
-                <label className="form-label">
-                  Icon Produk
-                </label>
 
-                <input
-                  className="form-input"
-                  value={form.icon}
-                  maxLength={4}
-                  onChange={(event) =>
-                    handleInput(
-                      'icon',
-                      event.target.value,
-                    )
-                  }
-                  placeholder="📦"
-                />
+              <div>
+                <span className="mb-2 block text-xs font-black text-slate-600">
+                  Ikon produk
+                </span>
 
-                <div className="emoji-row">
-                  {[
-                    '📦',
-                    '🍚',
-                    '🫗',
-                    '🧂',
-                    '🍜',
-                    '🥚',
-                    '🍵',
-                    '🥤',
-                    '🍞',
-                    '🧴',
-                    '🧃',
-                    '🛒',
-                  ].map((emoji) => (
-                    <button
-                      key={emoji}
-                      className={`emoji-button ${
-                        form.icon === emoji
-                          ? 'selected'
-                          : ''
-                      }`}
-                      onClick={() =>
-                        handleInput('icon', emoji)
-                      }
-                    >
-                      {emoji}
-                    </button>
-                  ))}
+                <div className="grid grid-cols-6 gap-2">
+                  {ICONS.map(
+                    (icon) => (
+                      <button
+                        key={icon}
+                        type="button"
+                        onClick={() =>
+                          updateForm(
+                            'icon',
+                            icon,
+                          )
+                        }
+                        disabled={saving}
+                        className={`flex h-11 items-center justify-center rounded-xl text-xl transition disabled:opacity-50 ${
+                          form.icon ===
+                          icon
+                            ? 'bg-blue-600 shadow-lg shadow-blue-500/20'
+                            : 'bg-slate-50 hover:bg-slate-100'
+                        }`}
+                        aria-label={`Pilih ikon ${icon}`}
+                      >
+                        {icon}
+                      </button>
+                    ),
+                  )}
                 </div>
               </div>
 
-            </div>
+              {error && (
+                <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-bold leading-5 text-red-600">
+                  {error}
+                </div>
+              )}
 
-            <div className="modal-footer">
-              <button
-                className="secondary-button"
-                onClick={closeModal}
-              >
-                Batal
-              </button>
+              {/* ACTION */}
 
-              <button
-                className="primary-button"
-                onClick={handleSubmit}
-              >
-                {editingId !== null
-                  ? 'Simpan Perubahan'
-                  : 'Tambah Produk'}
-              </button>
-            </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  disabled={saving}
+                  className="flex-1 rounded-2xl bg-slate-100 px-4 py-3.5 text-sm font-black text-slate-600 hover:bg-slate-200 disabled:opacity-50"
+                >
+                  Batal
+                </button>
 
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="flex-[1.5] rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-3.5 text-sm font-black text-white shadow-lg shadow-blue-500/20 hover:from-blue-700 hover:to-indigo-700 disabled:cursor-wait disabled:opacity-60"
+                >
+                  {saving
+                    ? 'Menyimpan...'
+                    : editingId !== null
+                      ? 'Simpan Perubahan'
+                      : 'Tambah Produk'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
-
-      {/* DELETE MODAL */}
-      {showDeleteModal && (
-        <div
-          className="modal-overlay"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
-              closeDeleteModal()
-            }
-          }}
-        >
-          <div className="delete-card">
-
-            <div className="delete-icon">
-              🗑️
-            </div>
-
-            <h2 className="delete-title">
-              Hapus Produk?
-            </h2>
-
-            <p className="delete-text">
-              Produk yang dihapus tidak akan muncul lagi
-              di daftar produk. Pastikan kamu benar-benar
-              ingin menghapusnya.
-            </p>
-
-            <div className="delete-actions">
-
-              <button
-                className="delete-cancel"
-                onClick={closeDeleteModal}
-              >
-                Batal
-              </button>
-
-              <button
-                className="delete-confirm"
-                onClick={handleDelete}
-              >
-                Ya, Hapus
-              </button>
-
-            </div>
-
-          </div>
-        </div>
-      )}
-    </>
+    </div>
   )
 }
 

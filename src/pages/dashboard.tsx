@@ -1,7 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
-import data from '../data/data.json'
 import {
-  addTransaction,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react'
+
+import {
+  DATA_CHANGED_EVENT,
   formatRupiah,
   getBalance,
   getProducts,
@@ -25,38 +29,168 @@ type Notification = {
   page?: string
 }
 
-const NOTIFICATION_READ_KEY = 'catatTokoReadNotifications'
+const NOTIFICATION_READ_KEY =
+  'catatTokoReadNotifications'
 
-function Dashboard({ onNavigate }: DashboardProps) {
-  const [period, setPeriod] = useState<Period>('today')
-  const [showBalance, setShowBalance] = useState(true)
-  const [showNotifications, setShowNotifications] = useState(false)
+function safeGetTransactions(): Transaction[] {
+  try {
+    const result =
+      getTransactions()
 
-  const [balance, setBalance] = useState(getBalance())
-  const [transactions, setTransactions] = useState<Transaction[]>(
-    getTransactions(),
-  )
-  const [products, setProducts] = useState<Product[]>(getProducts())
+    return Array.isArray(result)
+      ? result
+      : []
+  } catch {
+    return []
+  }
+}
 
-  const [search, setSearch] = useState('')
-  const [readNotifications, setReadNotifications] = useState<string[]>(
-    () => {
+function safeGetProducts(): Product[] {
+  try {
+    const result =
+      getProducts()
+
+    return Array.isArray(result)
+      ? result
+      : []
+  } catch {
+    return []
+  }
+}
+
+function safeGetBalance(): number {
+  try {
+    const result =
+      getBalance()
+
+    return typeof result === 'number' &&
+      Number.isFinite(result)
+      ? result
+      : 0
+  } catch {
+    return 0
+  }
+}
+
+function getTransactionTimestamp(
+  transaction: Transaction,
+): number {
+  if (transaction.createdAt) {
+    const timestamp =
+      new Date(
+        transaction.createdAt,
+      ).getTime()
+
+    if (Number.isFinite(timestamp)) {
+      return timestamp
+    }
+  }
+
+  return 0
+}
+
+function getTransactionIcon(
+  type: Transaction['type'],
+) {
+  if (type === 'income') {
+    return '↗'
+  }
+
+  if (type === 'expense') {
+    return '↘'
+  }
+
+  return '◎'
+}
+
+function getTransactionStyle(
+  type: Transaction['type'],
+) {
+  if (type === 'income') {
+    return {
+      icon: 'bg-emerald-50 text-emerald-600',
+      amount: 'text-emerald-600',
+    }
+  }
+
+  if (type === 'expense') {
+    return {
+      icon: 'bg-red-50 text-red-600',
+      amount: 'text-red-600',
+    }
+  }
+
+  return {
+    icon: 'bg-blue-50 text-blue-600',
+    amount: 'text-blue-600',
+  }
+}
+
+function Dashboard({
+  onNavigate,
+}: DashboardProps) {
+  const [period, setPeriod] =
+    useState<Period>('today')
+
+  const [showBalance, setShowBalance] =
+    useState(true)
+
+  const [showNotifications, setShowNotifications] =
+    useState(false)
+
+  const [search, setSearch] =
+    useState('')
+
+  const [balance, setBalance] =
+    useState<number>(
+      safeGetBalance(),
+    )
+
+  const [transactions, setTransactions] =
+    useState<Transaction[]>(
+      safeGetTransactions(),
+    )
+
+  const [products, setProducts] =
+    useState<Product[]>(
+      safeGetProducts(),
+    )
+
+  const [readNotifications, setReadNotifications] =
+    useState<string[]>(() => {
       try {
-        const saved = localStorage.getItem(
-          NOTIFICATION_READ_KEY,
-        )
+        const saved =
+          localStorage.getItem(
+            NOTIFICATION_READ_KEY,
+          )
 
-        return saved ? JSON.parse(saved) : []
+        if (!saved) {
+          return []
+        }
+
+        const parsed =
+          JSON.parse(saved)
+
+        return Array.isArray(parsed)
+          ? parsed
+          : []
       } catch {
         return []
       }
-    },
-  )
+    })
 
   const loadData = () => {
-    setBalance(getBalance())
-    setTransactions(getTransactions())
-    setProducts(getProducts())
+    setBalance(
+      safeGetBalance(),
+    )
+
+    setTransactions(
+      safeGetTransactions(),
+    )
+
+    setProducts(
+      safeGetProducts(),
+    )
   }
 
   useEffect(() => {
@@ -67,1299 +201,452 @@ function Dashboard({ onNavigate }: DashboardProps) {
     }
 
     window.addEventListener(
-      'catatTokoDataChanged',
+      DATA_CHANGED_EVENT,
       handleDataChanged,
     )
 
     return () => {
       window.removeEventListener(
-        'catatTokoDataChanged',
+        DATA_CHANGED_EVENT,
         handleDataChanged,
       )
     }
   }, [])
 
-  const filteredTransactions = useMemo(() => {
-    return transactions.filter((transaction) =>
-      isInPeriod(transaction.date, period),
-    )
-  }, [transactions, period])
-
-  const totalIncome = useMemo(() => {
-    return filteredTransactions
-      .filter(
-        (transaction) => transaction.type === 'income',
+  const filteredTransactions =
+    useMemo(() => {
+      return transactions.filter(
+        (transaction) =>
+          isInPeriod(
+            transaction.createdAt ||
+              transaction.date,
+            period,
+          ),
       )
-      .reduce(
-        (total, transaction) => total + transaction.amount,
-        0,
-      )
-  }, [filteredTransactions])
+    }, [
+      transactions,
+      period,
+    ])
 
-  const totalExpense = useMemo(() => {
-    return filteredTransactions
-      .filter(
-        (transaction) => transaction.type === 'expense',
-      )
-      .reduce(
-        (total, transaction) => total + transaction.amount,
-        0,
-      )
-  }, [filteredTransactions])
+  const totalIncome =
+    useMemo(() => {
+      return filteredTransactions
+        .filter(
+          (transaction) =>
+            transaction.type ===
+            'income',
+        )
+        .reduce(
+          (total, transaction) =>
+            total +
+            Number(
+              transaction.amount || 0,
+            ),
+          0,
+        )
+    }, [filteredTransactions])
 
-  const netProfit = totalIncome - totalExpense
+  const totalExpense =
+    useMemo(() => {
+      return filteredTransactions
+        .filter(
+          (transaction) =>
+            transaction.type ===
+            'expense',
+        )
+        .reduce(
+          (total, transaction) =>
+            total +
+            Number(
+              transaction.amount || 0,
+            ),
+          0,
+        )
+    }, [filteredTransactions])
 
-  const transactionCount = filteredTransactions.length
+  const totalSaving =
+    useMemo(() => {
+      return filteredTransactions
+        .filter(
+          (transaction) =>
+            transaction.type ===
+            'saving',
+        )
+        .reduce(
+          (total, transaction) =>
+            total +
+            Number(
+              transaction.amount || 0,
+            ),
+          0,
+        )
+    }, [filteredTransactions])
+
+  const netProfit =
+    totalIncome - totalExpense
+
+  const transactionCount =
+    filteredTransactions.length
 
   const averageTransaction =
     transactionCount > 0
       ? Math.round(
           filteredTransactions.reduce(
             (total, transaction) =>
-              total + transaction.amount,
+              total +
+              Number(
+                transaction.amount ||
+                  0,
+              ),
             0,
-          ) / transactionCount,
+          ) /
+            transactionCount,
         )
       : 0
 
-  const lowStockProducts = useMemo(() => {
-    return products
-      .filter((product) => product.stock <= 10)
-      .sort((a, b) => a.stock - b.stock)
-  }, [products])
+  const lowStockProducts =
+    useMemo(() => {
+      return [...products]
+        .filter(
+          (product) =>
+            Number(
+              product.stock || 0,
+            ) <= 10,
+        )
+        .sort(
+          (a, b) =>
+            Number(
+              a.stock || 0,
+            ) -
+            Number(
+              b.stock || 0,
+            ),
+        )
+    }, [products])
 
-  const recentTransactions = useMemo(() => {
-    return [...transactions]
-      .sort((a, b) => {
-        const dateA = a.createdAt
-          ? new Date(a.createdAt).getTime()
-          : 0
+  const recentTransactions =
+    useMemo(() => {
+      return [...transactions]
+        .sort(
+          (a, b) =>
+            getTransactionTimestamp(
+              b,
+            ) -
+            getTransactionTimestamp(
+              a,
+            ),
+        )
+        .slice(0, 6)
+    }, [transactions])
 
-        const dateB = b.createdAt
-          ? new Date(b.createdAt).getTime()
-          : 0
+  const searchResults =
+    useMemo(() => {
+      const keyword =
+        search.trim().toLowerCase()
 
-        return dateB - dateA
-      })
-      .slice(0, 5)
-  }, [transactions])
+      if (!keyword) {
+        return []
+      }
 
-  /*
-   * NOTIFICATION SYSTEM
-   */
-  const notifications = useMemo<Notification[]>(() => {
-    const result: Notification[] = []
+      return transactions
+        .filter((transaction) =>
+          transaction.title
+            .toLowerCase()
+            .includes(keyword),
+        )
+        .sort(
+          (a, b) =>
+            getTransactionTimestamp(
+              b,
+            ) -
+            getTransactionTimestamp(
+              a,
+            ),
+        )
+        .slice(0, 5)
+    }, [
+      transactions,
+      search,
+    ])
 
-    /*
-     * 1. STOK MENIPIS
-     */
-    lowStockProducts.slice(0, 5).forEach((product) => {
-      result.push({
-        id: `stock-${product.id}`,
-        title: 'Stok Menipis',
-        message: `${product.name} tersisa ${product.stock} stok.`,
-        type: 'warning',
-        icon: '📦',
-        page: 'produk',
-      })
-    })
+  const notifications =
+    useMemo<Notification[]>(() => {
+      const result: Notification[] =
+        []
 
-    /*
-     * 2. PEMASUKAN TERBARU
-     */
-    const latestIncome = [...transactions]
-      .filter(
-        (transaction) => transaction.type === 'income',
-      )
-      .sort((a, b) => {
-        const dateA = a.createdAt
-          ? new Date(a.createdAt).getTime()
-          : 0
+      lowStockProducts
+        .slice(0, 5)
+        .forEach((product) => {
+          result.push({
+            id: `stock-${product.id}`,
+            title: 'Stok Menipis',
+            message: `${product.name} tersisa ${product.stock} stok.`,
+            type: 'warning',
+            icon: '📦',
+            page: 'products',
+          })
+        })
 
-        const dateB = b.createdAt
-          ? new Date(b.createdAt).getTime()
-          : 0
+      const latestIncome =
+        [...transactions]
+          .filter(
+            (transaction) =>
+              transaction.type ===
+              'income',
+          )
+          .sort(
+            (a, b) =>
+              getTransactionTimestamp(
+                b,
+              ) -
+              getTransactionTimestamp(
+                a,
+              ),
+          )[0]
 
-        return dateB - dateA
-      })[0]
+      if (latestIncome) {
+        result.push({
+          id: `income-${latestIncome.id}`,
+          title: 'Pemasukan Terbaru',
+          message: `${latestIncome.title} sebesar ${formatRupiah(
+            latestIncome.amount,
+          )}.`,
+          type: 'success',
+          icon: '💰',
+          page: 'transactions',
+        })
+      }
 
-    if (latestIncome) {
-      result.push({
-        id: `income-${latestIncome.id}`,
-        title: 'Pemasukan Terbaru',
-        message: `${latestIncome.title} sebesar ${formatRupiah(
-          latestIncome.amount,
-        )}.`,
-        type: 'success',
-        icon: '💰',
-        page: 'transaksi',
-      })
-    }
+      const latestExpense =
+        [...transactions]
+          .filter(
+            (transaction) =>
+              transaction.type ===
+              'expense',
+          )
+          .sort(
+            (a, b) =>
+              getTransactionTimestamp(
+                b,
+              ) -
+              getTransactionTimestamp(
+                a,
+              ),
+          )[0]
 
-    /*
-     * 3. PENGELUARAN TERBARU
-     */
-    const latestExpense = [...transactions]
-      .filter(
-        (transaction) => transaction.type === 'expense',
-      )
-      .sort((a, b) => {
-        const dateA = a.createdAt
-          ? new Date(a.createdAt).getTime()
-          : 0
+      if (latestExpense) {
+        result.push({
+          id: `expense-${latestExpense.id}`,
+          title:
+            'Pengeluaran Terbaru',
+          message: `${latestExpense.title} sebesar ${formatRupiah(
+            latestExpense.amount,
+          )}.`,
+          type: 'info',
+          icon: '💸',
+          page: 'transactions',
+        })
+      }
 
-        const dateB = b.createdAt
-          ? new Date(b.createdAt).getTime()
-          : 0
+      if (result.length === 0) {
+        result.push({
+          id: 'welcome',
+          title: 'Semua Aman',
+          message:
+            'Belum ada pemberitahuan baru untuk kamu.',
+          type: 'success',
+          icon: '✓',
+        })
+      }
 
-        return dateB - dateA
-      })[0]
+      return result
+    }, [
+      lowStockProducts,
+      transactions,
+    ])
 
-    if (latestExpense) {
-      result.push({
-        id: `expense-${latestExpense.id}`,
-        title: 'Pengeluaran Terbaru',
-        message: `${latestExpense.title} sebesar ${formatRupiah(
-          latestExpense.amount,
-        )}.`,
-        type: 'info',
-        icon: '💸',
-        page: 'transaksi',
-      })
-    }
+  const unreadNotifications =
+    notifications.filter(
+      (notification) =>
+        !readNotifications.includes(
+          notification.id,
+        ),
+    )
 
-    /*
-     * 4. JIKA TIDAK ADA NOTIFIKASI
-     */
-    if (result.length === 0) {
-      result.push({
-        id: 'welcome',
-        title: 'Semua Aman',
-        message:
-          'Belum ada pemberitahuan baru untuk kamu.',
-        type: 'success',
-        icon: '✓',
-      })
-    }
-
-    return result
-  }, [lowStockProducts, transactions])
-
-  const unreadNotifications = notifications.filter(
-    (notification) =>
-      !readNotifications.includes(notification.id),
-  )
-
-  /*
-   * SEARCH
-   */
-  const searchResults = useMemo(() => {
-    const keyword = search.trim().toLowerCase()
-
-    if (!keyword) return []
-
-    return transactions
-      .filter((transaction) =>
-        transaction.title
-          .toLowerCase()
-          .includes(keyword),
-      )
-      .slice(0, 5)
-  }, [transactions, search])
-
-  /*
-   * SIMPAN NOTIFIKASI YANG SUDAH DIBACA
-   */
   const saveReadNotifications = (
     ids: string[],
   ) => {
     setReadNotifications(ids)
 
-    localStorage.setItem(
-      NOTIFICATION_READ_KEY,
-      JSON.stringify(ids),
-    )
+    try {
+      localStorage.setItem(
+        NOTIFICATION_READ_KEY,
+        JSON.stringify(ids),
+      )
+    } catch {
+      // Abaikan jika localStorage tidak tersedia.
+    }
   }
 
-  /*
-   * KLIK SATU NOTIFIKASI
-   */
   const handleNotificationClick = (
     notification: Notification,
   ) => {
-    const updated = Array.from(
-      new Set([
-        ...readNotifications,
-        notification.id,
-      ]),
-    )
+    const updated =
+      Array.from(
+        new Set([
+          ...readNotifications,
+          notification.id,
+        ]),
+      )
 
     saveReadNotifications(updated)
 
     if (notification.page) {
       setShowNotifications(false)
-      onNavigate?.(notification.page)
+      onNavigate?.(
+        notification.page,
+      )
     }
   }
 
-  /*
-   * TANDAI SEMUA DIBACA
-   */
-  const markAllNotificationsRead = () => {
-    const allIds = notifications.map(
-      (notification) => notification.id,
-    )
-
-    saveReadNotifications(allIds)
-  }
-
-  /*
-   * RESET NOTIFIKASI SAAT DATA BERUBAH BESAR
-   *
-   * Tidak menghapus semua status read.
-   * Hanya menjaga agar localStorage tetap bersih.
-   */
-  useEffect(() => {
-    const currentIds = new Set(
-      notifications.map(
-        (notification) => notification.id,
-      ),
-    )
-
-    const cleaned = readNotifications.filter((id) =>
-      currentIds.has(id),
-    )
-
-    if (cleaned.length !== readNotifications.length) {
-      saveReadNotifications(cleaned)
+  const markAllNotificationsRead =
+    () => {
+      saveReadNotifications(
+        notifications.map(
+          (notification) =>
+            notification.id,
+        ),
+      )
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [notifications])
 
-  /*
-   * QUICK INCOME
-   */
-  const handleDemoIncome = () => {
-    addTransaction({
-      title: 'Pemasukan Cepat',
-      type: 'income',
-      amount: 100000,
-    })
-  }
-
-  const handleQuickAction = (page: string) => {
-    onNavigate?.(page)
-  }
-
-  const getTransactionColor = (
-    type: Transaction['type'],
-  ) => {
-    if (type === 'income') return '#059669'
-    if (type === 'expense') return '#dc2626'
-    return '#6366f1'
-  }
-
-  const getTransactionIcon = (
-    type: Transaction['type'],
-  ) => {
-    if (type === 'income') return '↗'
-    if (type === 'expense') return '↘'
-    return '◎'
-  }
-
-  const getNotificationBackground = (
-    type: Notification['type'],
-  ) => {
-    if (type === 'warning') return '#fff7ed'
-    if (type === 'success') return '#ecfdf5'
-    return '#eff6ff'
-  }
-
-  const getNotificationColor = (
-    type: Notification['type'],
-  ) => {
-    if (type === 'warning') return '#ea580c'
-    if (type === 'success') return '#059669'
-    return '#2563eb'
-  }
-
-  const periodLabel = {
-    today: 'Hari Ini',
-    week: 'Minggu Ini',
-    month: 'Bulan Ini',
-  }[period]
+  const periodLabel =
+    {
+      today: 'Hari Ini',
+      week: 'Minggu Ini',
+      month: 'Bulan Ini',
+      all: 'Semua',
+    }[period] ?? 'Hari Ini'
 
   return (
-    <>
-      <style>{`
-        .dashboard-page {
-          min-height: 100vh;
-          padding: 30px;
-          background:
-            radial-gradient(
-              circle at top right,
-              rgba(37, 99, 235, 0.08),
-              transparent 28%
-            ),
-            #f8fafc;
-          color: #0f172a;
-        }
-
-        .dashboard-container {
-          width: 100%;
-          max-width: 1500px;
-          margin: 0 auto;
-        }
-
-        .dashboard-header {
-          display: flex;
-          align-items: flex-start;
-          justify-content: space-between;
-          gap: 24px;
-          margin-bottom: 24px;
-        }
-
-        .header-text {
-          min-width: 0;
-        }
-
-        .welcome-text {
-          margin: 0 0 6px;
-          color: #64748b;
-          font-size: 13px;
-          font-weight: 700;
-        }
-
-        .dashboard-title {
-          margin: 0;
-          font-size: 32px;
-          line-height: 1.15;
-          font-weight: 850;
-          letter-spacing: -0.035em;
-        }
-
-        .dashboard-subtitle {
-          margin: 8px 0 0;
-          color: #64748b;
-          font-size: 14px;
-        }
-
-        .header-actions {
-          position: relative;
-          display: flex;
-          align-items: center;
-          gap: 10px;
-        }
-
-        .search-box {
-          width: 260px;
-          height: 44px;
-          padding: 0 15px;
-          border: 1px solid #e2e8f0;
-          outline: none;
-          border-radius: 13px;
-          background: #ffffff;
-          color: #0f172a;
-          font-size: 13px;
-          box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
-          transition: 0.2s ease;
-        }
-
-        .search-box:focus {
-          border-color: #93c5fd;
-          box-shadow:
-            0 0 0 4px rgba(37, 99, 235, 0.08),
-            0 8px 24px rgba(15, 23, 42, 0.04);
-        }
-
-        .notification-button {
-          position: relative;
-          width: 44px;
-          height: 44px;
-          display: grid;
-          place-items: center;
-          border: 1px solid #e2e8f0;
-          border-radius: 13px;
-          background: #ffffff;
-          cursor: pointer;
-          font-size: 19px;
-          transition: 0.2s ease;
-        }
-
-        .notification-button:hover {
-          transform: translateY(-1px);
-          border-color: #bfdbfe;
-          background: #eff6ff;
-        }
-
-        .notification-badge {
-          position: absolute;
-          right: -4px;
-          top: -5px;
-          min-width: 19px;
-          height: 19px;
-          display: grid;
-          place-items: center;
-          padding: 0 5px;
-          border: 2px solid #f8fafc;
-          border-radius: 99px;
-          background: #ef4444;
-          color: #ffffff;
-          font-size: 9px;
-          font-weight: 900;
-        }
-
-        .notification-panel {
-          position: absolute;
-          z-index: 100;
-          top: 55px;
-          right: 0;
-          width: 370px;
-          overflow: hidden;
-          border: 1px solid #e2e8f0;
-          border-radius: 18px;
-          background: #ffffff;
-          box-shadow:
-            0 24px 60px rgba(15, 23, 42, 0.16),
-            0 5px 15px rgba(15, 23, 42, 0.06);
-          animation: notificationIn 0.18s ease;
-        }
-
-        @keyframes notificationIn {
-          from {
-            opacity: 0;
-            transform: translateY(-7px) scale(0.98);
-          }
-
-          to {
-            opacity: 1;
-            transform: translateY(0) scale(1);
-          }
-        }
-
-        .notification-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 15px;
-          padding: 17px;
-          border-bottom: 1px solid #f1f5f9;
-        }
-
-        .notification-heading {
-          margin: 0;
-          font-size: 14px;
-          font-weight: 850;
-        }
-
-        .notification-count {
-          margin: 4px 0 0;
-          color: #94a3b8;
-          font-size: 10px;
-        }
-
-        .mark-read-button {
-          border: none;
-          background: transparent;
-          color: #2563eb;
-          cursor: pointer;
-          font-size: 10px;
-          font-weight: 800;
-        }
-
-        .mark-read-button:hover {
-          text-decoration: underline;
-        }
-
-        .notification-list {
-          max-height: 390px;
-          overflow-y: auto;
-        }
-
-        .notification-item {
-          width: 100%;
-          display: flex;
-          align-items: flex-start;
-          gap: 11px;
-          padding: 14px 16px;
-          border: none;
-          border-bottom: 1px solid #f8fafc;
-          background: #ffffff;
-          text-align: left;
-          cursor: pointer;
-          transition: 0.18s ease;
-        }
-
-        .notification-item:hover {
-          background: #f8fafc;
-        }
-
-        .notification-item.unread {
-          background: #f8fbff;
-        }
-
-        .notification-item:last-child {
-          border-bottom: none;
-        }
-
-        .notification-icon {
-          width: 36px;
-          height: 36px;
-          flex: 0 0 36px;
-          display: grid;
-          place-items: center;
-          border-radius: 11px;
-          font-size: 16px;
-        }
-
-        .notification-content {
-          min-width: 0;
-          flex: 1;
-        }
-
-        .notification-title-row {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-        }
-
-        .notification-title {
-          margin: 0;
-          color: #1e293b;
-          font-size: 12px;
-          font-weight: 850;
-        }
-
-        .unread-dot {
-          width: 6px;
-          height: 6px;
-          border-radius: 50%;
-          background: #2563eb;
-        }
-
-        .notification-message {
-          margin: 4px 0 0;
-          color: #64748b;
-          font-size: 11px;
-          line-height: 1.5;
-        }
-
-        .notification-footer {
-          padding: 11px 16px;
-          border-top: 1px solid #f1f5f9;
-          background: #fafafa;
-          color: #94a3b8;
-          font-size: 9px;
-          text-align: center;
-        }
-
-        .search-results {
-          position: absolute;
-          z-index: 90;
-          top: 51px;
-          left: 0;
-          width: 260px;
-          overflow: hidden;
-          border: 1px solid #e2e8f0;
-          border-radius: 14px;
-          background: #ffffff;
-          box-shadow: 0 20px 45px rgba(15, 23, 42, 0.12);
-        }
-
-        .search-result {
-          display: flex;
-          align-items: center;
-          gap: 9px;
-          width: 100%;
-          padding: 11px 13px;
-          border: none;
-          border-bottom: 1px solid #f1f5f9;
-          background: #ffffff;
-          text-align: left;
-          cursor: pointer;
-        }
-
-        .search-result:hover {
-          background: #f8fafc;
-        }
-
-        .search-result:last-child {
-          border-bottom: none;
-        }
-
-        .search-result-icon {
-          width: 30px;
-          height: 30px;
-          display: grid;
-          place-items: center;
-          border-radius: 9px;
-          background: #eff6ff;
-          color: #2563eb;
-          font-size: 13px;
-        }
-
-        .search-result-title {
-          margin: 0;
-          overflow: hidden;
-          color: #1e293b;
-          font-size: 11px;
-          font-weight: 800;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-
-        .search-result-meta {
-          margin: 3px 0 0;
-          color: #94a3b8;
-          font-size: 9px;
-        }
-
-        .balance-card {
-          position: relative;
-          overflow: hidden;
-          margin-bottom: 20px;
-          padding: 25px;
-          border-radius: 22px;
-          background:
-            radial-gradient(
-              circle at 100% 0%,
-              rgba(99, 102, 241, 0.38),
-              transparent 34%
-            ),
-            linear-gradient(
-              135deg,
-              #172554,
-              #1e3a8a 58%,
-              #3730a3
-            );
-          color: #ffffff;
-          box-shadow: 0 20px 45px rgba(30, 58, 138, 0.2);
-        }
-
-        .balance-card::before {
-          content: '';
-          position: absolute;
-          width: 170px;
-          height: 170px;
-          right: -60px;
-          bottom: -90px;
-          border-radius: 50%;
-          border: 1px solid rgba(255, 255, 255, 0.12);
-        }
-
-        .balance-top {
-          position: relative;
-          z-index: 1;
-          display: flex;
-          align-items: flex-start;
-          justify-content: space-between;
-          gap: 15px;
-        }
-
-        .balance-label {
-          margin: 0;
-          color: rgba(255,255,255,0.7);
-          font-size: 12px;
-          font-weight: 700;
-        }
-
-        .balance-value {
-          margin: 8px 0 0;
-          font-size: 31px;
-          line-height: 1;
-          font-weight: 900;
-          letter-spacing: -0.035em;
-        }
-
-        .eye-button {
-          width: 38px;
-          height: 38px;
-          display: grid;
-          place-items: center;
-          border: 1px solid rgba(255,255,255,0.14);
-          border-radius: 11px;
-          background: rgba(255,255,255,0.08);
-          color: #ffffff;
-          cursor: pointer;
-        }
-
-        .balance-bottom {
-          position: relative;
-          z-index: 1;
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-end;
-          gap: 20px;
-          margin-top: 30px;
-        }
-
-        .store-info {
-          color: rgba(255,255,255,0.72);
-          font-size: 11px;
-        }
-
-        .store-name {
-          margin: 0 0 4px;
-          color: #ffffff;
-          font-size: 13px;
-          font-weight: 850;
-        }
-
-        .store-type {
-          margin: 0;
-        }
-
-        .period-wrapper {
-          display: flex;
-          align-items: center;
-          gap: 5px;
-          padding: 5px;
-          border: 1px solid #e2e8f0;
-          border-radius: 14px;
-          background: #ffffff;
-          box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
-        }
-
-        .period-button {
-          padding: 9px 12px;
-          border: none;
-          border-radius: 9px;
-          background: transparent;
-          color: #64748b;
-          cursor: pointer;
-          font-size: 11px;
-          font-weight: 800;
-        }
-
-        .period-button:hover {
-          background: #eff6ff;
-          color: #2563eb;
-        }
-
-        .period-button.active {
-          background: #2563eb;
-          color: #ffffff;
-          box-shadow: 0 5px 14px rgba(37, 99, 235, 0.2);
-        }
-
-        .section-title-row {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 15px;
-          margin-bottom: 13px;
-        }
-
-        .section-title {
-          margin: 0;
-          font-size: 16px;
-          font-weight: 850;
-        }
-
-        .section-link {
-          border: none;
-          background: transparent;
-          color: #2563eb;
-          cursor: pointer;
-          font-size: 11px;
-          font-weight: 800;
-        }
-
-        .stats-grid {
-          display: grid;
-          grid-template-columns: repeat(4, minmax(0, 1fr));
-          gap: 16px;
-          margin-bottom: 24px;
-        }
-
-        .stat-card {
-          padding: 20px;
-          border: 1px solid #e2e8f0;
-          border-radius: 18px;
-          background: #ffffff;
-          box-shadow: 0 8px 25px rgba(15, 23, 42, 0.045);
-        }
-
-        .stat-top {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 10px;
-        }
-
-        .stat-label {
-          margin: 0;
-          color: #64748b;
-          font-size: 11px;
-          font-weight: 750;
-        }
-
-        .stat-icon {
-          width: 35px;
-          height: 35px;
-          display: grid;
-          place-items: center;
-          border-radius: 10px;
-          font-weight: 900;
-        }
-
-        .stat-value {
-          margin: 15px 0 5px;
-          font-size: 20px;
-          font-weight: 900;
-          letter-spacing: -0.025em;
-        }
-
-        .stat-note {
-          margin: 0;
-          color: #94a3b8;
-          font-size: 9px;
-        }
-
-        .quick-grid {
-          display: grid;
-          grid-template-columns: repeat(4, minmax(0, 1fr));
-          gap: 12px;
-          margin-bottom: 24px;
-        }
-
-        .quick-button {
-          min-height: 94px;
-          padding: 16px;
-          border: 1px solid #e2e8f0;
-          border-radius: 17px;
-          background: #ffffff;
-          text-align: left;
-          cursor: pointer;
-          transition: 0.2s ease;
-          box-shadow: 0 7px 20px rgba(15, 23, 42, 0.035);
-        }
-
-        .quick-button:hover {
-          transform: translateY(-2px);
-          border-color: #bfdbfe;
-          box-shadow: 0 13px 28px rgba(37, 99, 235, 0.08);
-        }
-
-        .quick-icon {
-          width: 38px;
-          height: 38px;
-          display: grid;
-          place-items: center;
-          margin-bottom: 10px;
-          border-radius: 11px;
-          background: #eff6ff;
-          color: #2563eb;
-          font-size: 17px;
-        }
-
-        .quick-title {
-          margin: 0;
-          color: #1e293b;
-          font-size: 11px;
-          font-weight: 850;
-        }
-
-        .quick-description {
-          margin: 4px 0 0;
-          color: #94a3b8;
-          font-size: 9px;
-        }
-
-        .content-grid {
-          display: grid;
-          grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.75fr);
-          gap: 18px;
-          margin-bottom: 18px;
-        }
-
-        .panel {
-          overflow: hidden;
-          border: 1px solid #e2e8f0;
-          border-radius: 19px;
-          background: #ffffff;
-          box-shadow: 0 8px 25px rgba(15, 23, 42, 0.045);
-        }
-
-        .panel-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 15px;
-          padding: 19px 20px 10px;
-        }
-
-        .panel-title {
-          margin: 0;
-          font-size: 14px;
-          font-weight: 850;
-        }
-
-        .panel-subtitle {
-          margin: 4px 0 0;
-          color: #94a3b8;
-          font-size: 10px;
-        }
-
-        .transaction-list {
-          padding: 4px 20px 12px;
-        }
-
-        .transaction-row {
-          display: flex;
-          align-items: center;
-          gap: 11px;
-          padding: 12px 0;
-          border-bottom: 1px solid #f1f5f9;
-        }
-
-        .transaction-row:last-child {
-          border-bottom: none;
-        }
-
-        .transaction-icon {
-          width: 37px;
-          height: 37px;
-          flex: 0 0 37px;
-          display: grid;
-          place-items: center;
-          border-radius: 11px;
-          font-size: 15px;
-          font-weight: 900;
-        }
-
-        .transaction-info {
-          min-width: 0;
-          flex: 1;
-        }
-
-        .transaction-name {
-          margin: 0;
-          overflow: hidden;
-          color: #1e293b;
-          font-size: 11px;
-          font-weight: 800;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-
-        .transaction-meta {
-          margin: 3px 0 0;
-          color: #94a3b8;
-          font-size: 9px;
-        }
-
-        .transaction-amount {
-          text-align: right;
-          font-size: 11px;
-          font-weight: 850;
-          white-space: nowrap;
-        }
-
-        .stock-list {
-          padding: 5px 20px 15px;
-        }
-
-        .stock-row {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 11px 0;
-          border-bottom: 1px solid #f1f5f9;
-        }
-
-        .stock-row:last-child {
-          border-bottom: none;
-        }
-
-        .stock-icon {
-          width: 36px;
-          height: 36px;
-          display: grid;
-          place-items: center;
-          border-radius: 10px;
-          background: #fff7ed;
-          font-size: 15px;
-        }
-
-        .stock-info {
-          min-width: 0;
-          flex: 1;
-        }
-
-        .stock-name {
-          margin: 0;
-          overflow: hidden;
-          color: #1e293b;
-          font-size: 11px;
-          font-weight: 800;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-
-        .stock-price {
-          margin: 3px 0 0;
-          color: #94a3b8;
-          font-size: 9px;
-        }
-
-        .stock-number {
-          color: #ea580c;
-          font-size: 10px;
-          font-weight: 900;
-        }
-
-        .quick-income {
-          display: flex;
-          justify-content: center;
-          padding: 4px 20px 20px;
-        }
-
-        .quick-income-button {
-          width: 100%;
-          padding: 11px 15px;
-          border: none;
-          border-radius: 11px;
-          background: linear-gradient(
-            135deg,
-            #2563eb,
-            #4f46e5
-          );
-          color: #ffffff;
-          cursor: pointer;
-          font-size: 10px;
-          font-weight: 850;
-          box-shadow: 0 8px 18px rgba(37, 99, 235, 0.18);
-        }
-
-        .quick-income-button:hover {
-          transform: translateY(-1px);
-        }
-
-        .empty-small {
-          padding: 30px 20px;
-          color: #94a3b8;
-          font-size: 10px;
-          text-align: center;
-        }
-
-        .footer {
-          padding: 18px 0 5px;
-          color: #94a3b8;
-          font-size: 9px;
-          text-align: center;
-        }
-
-        @media (max-width: 1100px) {
-          .stats-grid {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-          }
-
-          .content-grid {
-            grid-template-columns: 1fr;
-          }
-        }
-
-        @media (max-width: 760px) {
-          .dashboard-page {
-            padding: 20px 15px 90px;
-          }
-
-          .dashboard-header {
-            flex-direction: column;
-          }
-
-          .header-actions {
-            width: 100%;
-          }
-
-          .search-box {
-            flex: 1;
-            width: auto;
-          }
-
-          .notification-panel {
-            position: fixed;
-            top: 76px;
-            left: 15px;
-            right: 15px;
-            width: auto;
-          }
-
-          .search-results {
-            width: calc(100% - 55px);
-          }
-
-          .dashboard-title {
-            font-size: 26px;
-          }
-
-          .balance-card {
-            padding: 20px;
-            border-radius: 18px;
-          }
-
-          .balance-value {
-            font-size: 25px;
-          }
-
-          .balance-bottom {
-            align-items: flex-start;
-            flex-direction: column;
-          }
-
-          .period-wrapper {
-            width: 100%;
-          }
-
-          .period-button {
-            flex: 1;
-          }
-
-          .quick-grid {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-          }
-        }
-
-        @media (max-width: 430px) {
-          .dashboard-page {
-            padding-left: 10px;
-            padding-right: 10px;
-          }
-
-          .stats-grid {
-            gap: 10px;
-          }
-
-          .stat-card {
-            padding: 14px;
-            border-radius: 15px;
-          }
-
-          .stat-label {
-            font-size: 9px;
-          }
-
-          .stat-value {
-            font-size: 15px;
-            word-break: break-word;
-          }
-
-          .stat-note {
-            font-size: 8px;
-          }
-
-          .quick-button {
-            min-height: 84px;
-            padding: 13px;
-          }
-
-          .panel-header {
-            padding-left: 15px;
-            padding-right: 15px;
-          }
-
-          .transaction-list,
-          .stock-list {
-            padding-left: 15px;
-            padding-right: 15px;
-          }
-
-          .quick-income {
-            padding-left: 15px;
-            padding-right: 15px;
-          }
-
-          .transaction-amount {
-            font-size: 9px;
-          }
-        }
-      `}</style>
-
-      <main className="dashboard-page">
-        <div className="dashboard-container">
-
-          {/* HEADER */}
-          <header className="dashboard-header">
-            <div className="header-text">
-              <p className="welcome-text">
-                Selamat datang kembali 👋
-              </p>
-
-              <h1 className="dashboard-title">
-                Halo, Putra
-              </h1>
-
-              <p className="dashboard-subtitle">
-                Kelola keuangan Toko Berkah Jaya dengan
-                lebih mudah.
-              </p>
+    <main className="min-h-screen bg-slate-50 px-4 py-6 pb-28 text-slate-900 sm:px-6 sm:py-8 lg:px-8">
+      <div className="mx-auto w-full max-w-7xl">
+
+        <header className="mb-7 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+
+          <div>
+            <div className="mb-3 flex items-center gap-2">
+              <span className="rounded-full bg-blue-50 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-blue-600">
+                CatatToko
+              </span>
+
+              <span className="text-xs text-slate-400">
+                Dashboard
+              </span>
             </div>
 
-            <div className="header-actions">
+            <h1 className="text-3xl font-black tracking-tight sm:text-4xl">
+              Halo, Putra 👋
+            </h1>
 
-              {/* SEARCH */}
-              <div style={{ position: 'relative' }}>
+            <p className="mt-2 text-sm text-slate-500 sm:text-base">
+              Kelola Toko Berkah Jaya
+              dengan lebih mudah.
+            </p>
+          </div>
+
+          <div className="relative w-full lg:w-auto">
+
+            <div className="flex gap-2">
+
+              <div className="relative flex-1 lg:w-64 lg:flex-none">
+
                 <input
-                  className="search-box"
+                  type="text"
                   value={search}
                   onChange={(event) =>
-                    setSearch(event.target.value)
+                    setSearch(
+                      event.target.value,
+                    )
                   }
                   placeholder="Cari transaksi..."
+                  className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-500/10"
                 />
 
-                {searchResults.length > 0 && (
-                  <div className="search-results">
-                    {searchResults.map((transaction) => (
-                      <button
-                        className="search-result"
-                        key={transaction.id}
-                        onClick={() => {
-                          setSearch('')
-                          onNavigate?.('transaksi')
-                        }}
-                      >
-                        <div className="search-result-icon">
-                          {getTransactionIcon(
-                            transaction.type,
-                          )}
-                        </div>
+                {searchResults.length >
+                  0 && (
+                  <div className="absolute left-0 right-0 top-14 z-50 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
 
-                        <div style={{ minWidth: 0 }}>
-                          <p className="search-result-title">
-                            {transaction.title}
-                          </p>
+                    {searchResults.map(
+                      (transaction) => (
+                        <button
+                          key={
+                            transaction.id
+                          }
+                          type="button"
+                          onClick={() => {
+                            setSearch('')
+                            onNavigate?.(
+                              'transactions',
+                            )
+                          }}
+                          className="flex w-full items-center gap-3 border-b border-slate-100 p-3 text-left transition last:border-0 hover:bg-slate-50"
+                        >
+                          <span
+                            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${getTransactionStyle(
+                              transaction.type,
+                            ).icon}`}
+                          >
+                            {getTransactionIcon(
+                              transaction.type,
+                            )}
+                          </span>
 
-                          <p className="search-result-meta">
-                            {formatRupiah(
-                              transaction.amount,
-                            )}{' '}
-                            • {transaction.date}
-                          </p>
-                        </div>
-                      </button>
-                    ))}
+                          <span className="min-w-0">
+                            <strong className="block truncate text-xs text-slate-800">
+                              {
+                                transaction.title
+                              }
+                            </strong>
+
+                            <small className="mt-1 block text-[10px] text-slate-400">
+                              {formatRupiah(
+                                transaction.amount,
+                              )}
+                              {' • '}
+                              {
+                                transaction.date
+                              }
+                            </small>
+                          </span>
+                        </button>
+                      ),
+                    )}
+
                   </div>
                 )}
+
               </div>
 
-              {/* NOTIFICATION */}
-              <div style={{ position: 'relative' }}>
+              <div className="relative">
+
                 <button
-                  className="notification-button"
+                  type="button"
                   onClick={() =>
                     setShowNotifications(
-                      !showNotifications,
+                      (value) =>
+                        !value,
                     )
                   }
                   aria-label="Notifikasi"
+                  className="relative flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-lg shadow-sm transition hover:border-blue-200 hover:bg-blue-50"
                 >
                   🔔
 
-                  {unreadNotifications.length > 0 && (
-                    <span className="notification-badge">
-                      {unreadNotifications.length > 9
+                  {unreadNotifications.length >
+                    0 && (
+                    <span className="absolute -right-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full border-2 border-slate-50 bg-red-500 px-1 text-[9px] font-black text-white">
+                      {unreadNotifications.length >
+                      9
                         ? '9+'
                         : unreadNotifications.length}
                     </span>
@@ -1367,562 +654,686 @@ function Dashboard({ onNavigate }: DashboardProps) {
                 </button>
 
                 {showNotifications && (
-                  <div className="notification-panel">
+                  <div className="fixed left-4 right-4 top-20 z-[100] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl sm:absolute sm:left-auto sm:right-0 sm:top-14 sm:w-[380px]">
 
-                    <div className="notification-header">
+                    <div className="flex items-center justify-between border-b border-slate-100 p-4">
+
                       <div>
-                        <h3 className="notification-heading">
+                        <h3 className="text-sm font-black text-slate-900">
                           Notifikasi
                         </h3>
 
-                        <p className="notification-count">
-                          {unreadNotifications.length > 0
+                        <p className="mt-1 text-[10px] text-slate-400">
+                          {unreadNotifications.length >
+                          0
                             ? `${unreadNotifications.length} belum dibaca`
                             : 'Semua sudah dibaca'}
                         </p>
                       </div>
 
-                      {unreadNotifications.length > 0 && (
+                      {unreadNotifications.length >
+                        0 && (
                         <button
-                          className="mark-read-button"
+                          type="button"
                           onClick={
                             markAllNotificationsRead
                           }
+                          className="text-[10px] font-black text-blue-600 hover:underline"
                         >
-                          Tandai semua dibaca
+                          Tandai semua
                         </button>
                       )}
+
                     </div>
 
-                    <div className="notification-list">
+                    <div className="max-h-[360px] overflow-y-auto">
+
                       {notifications.map(
-                        (notification) => {
-                          const isUnread =
+                        (
+                          notification,
+                        ) => {
+                          const unread =
                             !readNotifications.includes(
                               notification.id,
                             )
 
-                          const color =
-                            getNotificationColor(
-                              notification.type,
-                            )
-
                           return (
                             <button
-                              key={notification.id}
-                              className={`notification-item ${
-                                isUnread ? 'unread' : ''
-                              }`}
+                              key={
+                                notification.id
+                              }
+                              type="button"
                               onClick={() =>
                                 handleNotificationClick(
                                   notification,
                                 )
                               }
+                              className={`flex w-full gap-3 border-b border-slate-100 p-4 text-left transition last:border-0 hover:bg-slate-50 ${
+                                unread
+                                  ? 'bg-blue-50/30'
+                                  : 'bg-white'
+                              }`}
                             >
-                              <div
-                                className="notification-icon"
-                                style={{
-                                  background:
-                                    getNotificationBackground(
-                                      notification.type,
-                                    ),
-                                }}
-                              >
-                                {notification.icon}
-                              </div>
+                              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-lg">
+                                {
+                                  notification.icon
+                                }
+                              </span>
 
-                              <div className="notification-content">
-                                <div className="notification-title-row">
-                                  <p className="notification-title">
-                                    {notification.title}
-                                  </p>
+                              <span className="min-w-0 flex-1">
+                                <span className="flex items-center gap-2">
+                                  <strong className="text-xs font-black text-slate-800">
+                                    {
+                                      notification.title
+                                    }
+                                  </strong>
 
-                                  {isUnread && (
-                                    <span
-                                      className="unread-dot"
-                                      style={{
-                                        background: color,
-                                      }}
-                                    />
+                                  {unread && (
+                                    <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
                                   )}
-                                </div>
+                                </span>
 
-                                <p className="notification-message">
-                                  {notification.message}
-                                </p>
-                              </div>
+                                <span className="mt-1 block text-[11px] leading-5 text-slate-500">
+                                  {
+                                    notification.message
+                                  }
+                                </span>
+                              </span>
                             </button>
                           )
                         },
                       )}
-                    </div>
 
-                    <div className="notification-footer">
-                      Notifikasi diperbarui otomatis dari
-                      data aplikasi.
                     </div>
 
                   </div>
                 )}
+
               </div>
+
             </div>
-          </header>
 
-          {/* BALANCE */}
-          <section className="balance-card">
+          </div>
 
-            <div className="balance-top">
-              <div>
-                <p className="balance-label">
-                  Saldo Saat Ini
-                </p>
+        </header>
 
-                <p className="balance-value">
+        <section className="mb-5 overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950 p-5 text-white shadow-xl shadow-blue-900/10 sm:p-7">
+
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+
+            <div>
+              <p className="text-xs font-bold text-blue-200">
+                Saldo Toko
+              </p>
+
+              <div className="mt-2 flex items-center gap-3">
+
+                <h2 className="text-3xl font-black tracking-tight sm:text-4xl">
                   {showBalance
-                    ? formatRupiah(balance)
-                    : '••••••••'}
-                </p>
-              </div>
-
-              <button
-                className="eye-button"
-                onClick={() =>
-                  setShowBalance(!showBalance)
-                }
-              >
-                {showBalance ? '◉' : '◎'}
-              </button>
-            </div>
-
-            <div className="balance-bottom">
-
-              <div className="store-info">
-                <p className="store-name">
-                  {data.store.name}
-                </p>
-
-                <p className="store-type">
-                  {data.store.type} • {data.store.status}
-                </p>
-              </div>
-
-              <div className="period-wrapper">
-                {(
-                  [
-                    ['today', 'Hari Ini'],
-                    ['week', 'Minggu Ini'],
-                    ['month', 'Bulan Ini'],
-                  ] as [Period, string][]
-                ).map(([value, label]) => (
-                  <button
-                    key={value}
-                    className={`period-button ${
-                      period === value
-                        ? 'active'
-                        : ''
-                    }`}
-                    onClick={() => setPeriod(value)}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-
-            </div>
-          </section>
-
-          {/* STATS */}
-          <section className="stats-grid">
-
-            <article className="stat-card">
-              <div className="stat-top">
-                <p className="stat-label">
-                  Pemasukan
-                </p>
-
-                <div
-                  className="stat-icon"
-                  style={{
-                    color: '#059669',
-                    background: '#ecfdf5',
-                  }}
-                >
-                  ↗
-                </div>
-              </div>
-
-              <p className="stat-value">
-                {formatRupiah(totalIncome)}
-              </p>
-
-              <p className="stat-note">
-                {periodLabel}
-              </p>
-            </article>
-
-            <article className="stat-card">
-              <div className="stat-top">
-                <p className="stat-label">
-                  Pengeluaran
-                </p>
-
-                <div
-                  className="stat-icon"
-                  style={{
-                    color: '#dc2626',
-                    background: '#fef2f2',
-                  }}
-                >
-                  ↘
-                </div>
-              </div>
-
-              <p className="stat-value">
-                {formatRupiah(totalExpense)}
-              </p>
-
-              <p className="stat-note">
-                {periodLabel}
-              </p>
-            </article>
-
-            <article className="stat-card">
-              <div className="stat-top">
-                <p className="stat-label">
-                  Net Profit
-                </p>
-
-                <div
-                  className="stat-icon"
-                  style={{
-                    color:
-                      netProfit >= 0
-                        ? '#2563eb'
-                        : '#dc2626',
-                    background:
-                      netProfit >= 0
-                        ? '#eff6ff'
-                        : '#fef2f2',
-                  }}
-                >
-                  ✓
-                </div>
-              </div>
-
-              <p
-                className="stat-value"
-                style={{
-                  color:
-                    netProfit >= 0
-                      ? '#059669'
-                      : '#dc2626',
-                }}
-              >
-                {formatRupiah(netProfit)}
-              </p>
-
-              <p className="stat-note">
-                Pemasukan − Pengeluaran
-              </p>
-            </article>
-
-            <article className="stat-card">
-              <div className="stat-top">
-                <p className="stat-label">
-                  Rata-rata
-                </p>
-
-                <div
-                  className="stat-icon"
-                  style={{
-                    color: '#6366f1',
-                    background: '#eef2ff',
-                  }}
-                >
-                  ≈
-                </div>
-              </div>
-
-              <p className="stat-value">
-                {formatRupiah(averageTransaction)}
-              </p>
-
-              <p className="stat-note">
-                {transactionCount} transaksi
-              </p>
-            </article>
-
-          </section>
-
-          {/* QUICK ACTION */}
-          <section>
-            <div className="section-title-row">
-              <h2 className="section-title">
-                Quick Actions
-              </h2>
-            </div>
-
-            <div className="quick-grid">
-
-              <button
-                className="quick-button"
-                onClick={() =>
-                  handleQuickAction('catat')
-                }
-              >
-                <div className="quick-icon">
-                  +
-                </div>
-
-                <p className="quick-title">
-                  Catat Keuangan
-                </p>
-
-                <p className="quick-description">
-                  Pemasukan & pengeluaran
-                </p>
-              </button>
-
-              <button
-                className="quick-button"
-                onClick={() =>
-                  handleQuickAction('penjualan')
-                }
-              >
-                <div className="quick-icon">
-                  💵
-                </div>
-
-                <p className="quick-title">
-                  Penjualan
-                </p>
-
-                <p className="quick-description">
-                  Catat transaksi jual
-                </p>
-              </button>
-
-              <button
-                className="quick-button"
-                onClick={() =>
-                  handleQuickAction('produk')
-                }
-              >
-                <div className="quick-icon">
-                  📦
-                </div>
-
-                <p className="quick-title">
-                  Produk
-                </p>
-
-                <p className="quick-description">
-                  Kelola stok barang
-                </p>
-              </button>
-
-              <button
-                className="quick-button"
-                onClick={() =>
-                  handleQuickAction('laporan')
-                }
-              >
-                <div className="quick-icon">
-                  📊
-                </div>
-
-                <p className="quick-title">
-                  Laporan
-                </p>
-
-                <p className="quick-description">
-                  Analisis keuangan
-                </p>
-              </button>
-
-            </div>
-          </section>
-
-          {/* RECENT + STOCK */}
-          <section className="content-grid">
-
-            {/* RECENT TRANSACTIONS */}
-            <article className="panel">
-
-              <div className="panel-header">
-                <div>
-                  <h2 className="panel-title">
-                    Transaksi Terbaru
-                  </h2>
-
-                  <p className="panel-subtitle">
-                    Aktivitas keuangan terbaru.
-                  </p>
-                </div>
-
-                <button
-                  className="section-link"
-                  onClick={() =>
-                    onNavigate?.('transaksi')
-                  }
-                >
-                  Lihat semua →
-                </button>
-              </div>
-
-              {recentTransactions.length === 0 ? (
-                <div className="empty-small">
-                  Belum ada transaksi.
-                </div>
-              ) : (
-                <div className="transaction-list">
-                  {recentTransactions.map(
-                    (transaction) => {
-                      const color =
-                        getTransactionColor(
-                          transaction.type,
-                        )
-
-                      const sign =
-                        transaction.type === 'income'
-                          ? '+'
-                          : transaction.type === 'expense'
-                            ? '-'
-                            : '•'
-
-                      return (
-                        <div
-                          className="transaction-row"
-                          key={transaction.id}
-                        >
-                          <div
-                            className="transaction-icon"
-                            style={{
-                              color,
-                              background:
-                                transaction.type ===
-                                'income'
-                                  ? '#ecfdf5'
-                                  : transaction.type ===
-                                      'expense'
-                                    ? '#fef2f2'
-                                    : '#eef2ff',
-                            }}
-                          >
-                            {getTransactionIcon(
-                              transaction.type,
-                            )}
-                          </div>
-
-                          <div className="transaction-info">
-                            <p className="transaction-name">
-                              {transaction.title}
-                            </p>
-
-                            <p className="transaction-meta">
-                              {transaction.date} •{' '}
-                              {transaction.time}
-                            </p>
-                          </div>
-
-                          <div
-                            className="transaction-amount"
-                            style={{ color }}
-                          >
-                            {sign}{' '}
-                            {formatRupiah(
-                              transaction.amount,
-                            )}
-                          </div>
-                        </div>
+                    ? formatRupiah(
+                        balance,
                       )
-                    },
-                  )}
-                </div>
-              )}
-
-              <div className="quick-income">
-                <button
-                  className="quick-income-button"
-                  onClick={handleDemoIncome}
-                >
-                  + Tambah Pemasukan Cepat Rp100.000
-                </button>
-              </div>
-            </article>
-
-            {/* LOW STOCK */}
-            <article className="panel">
-
-              <div className="panel-header">
-                <div>
-                  <h2 className="panel-title">
-                    Stok Menipis
-                  </h2>
-
-                  <p className="panel-subtitle">
-                    Produk dengan stok ≤ 10.
-                  </p>
-                </div>
+                    : 'Rp •••••••'}
+                </h2>
 
                 <button
-                  className="section-link"
+                  type="button"
                   onClick={() =>
-                    onNavigate?.('produk')
+                    setShowBalance(
+                      (value) =>
+                        !value,
+                    )
+                  }
+                  className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 text-sm transition hover:bg-white/20"
+                  aria-label={
+                    showBalance
+                      ? 'Sembunyikan saldo'
+                      : 'Tampilkan saldo'
                   }
                 >
-                  Kelola →
+                  {showBalance
+                    ? '◉'
+                    : '○'}
                 </button>
+
               </div>
 
-              {lowStockProducts.length === 0 ? (
-                <div className="empty-small">
-                  ✓ Semua stok aman.
-                </div>
-              ) : (
-                <div className="stock-list">
-                  {lowStockProducts
-                    .slice(0, 5)
-                    .map((product) => (
-                      <div
-                        className="stock-row"
-                        key={product.id}
-                      >
-                        <div className="stock-icon">
-                          {product.icon}
-                        </div>
+              <p className="mt-2 text-xs text-slate-400">
+                Saldo dihitung dari
+                aktivitas keuangan toko.
+              </p>
+            </div>
 
-                        <div className="stock-info">
-                          <p className="stock-name">
-                            {product.name}
-                          </p>
+            <button
+              type="button"
+              onClick={() =>
+                onNavigate?.(
+                  'transactions',
+                )
+              }
+              className="w-full rounded-2xl bg-white px-5 py-3.5 text-sm font-black text-slate-900 transition hover:bg-blue-50 sm:w-auto"
+            >
+              Lihat Transaksi →
+            </button>
 
-                          <p className="stock-price">
-                            {formatRupiah(
-                              product.price,
-                            )}
-                          </p>
-                        </div>
+          </div>
 
-                        <span className="stock-number">
-                          {product.stock} stok
-                        </span>
-                      </div>
-                    ))}
-                </div>
+        </section>
+
+        <section className="mb-5 flex gap-2 overflow-x-auto pb-1">
+
+          {(
+            [
+              ['today', 'Hari Ini'],
+              ['week', 'Minggu Ini'],
+              ['month', 'Bulan Ini'],
+              ['all', 'Semua'],
+            ] as [
+              Period,
+              string,
+            ][]
+          ).map(
+            ([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() =>
+                  setPeriod(value)
+                }
+                className={`whitespace-nowrap rounded-xl px-4 py-2.5 text-xs font-black transition ${
+                  period === value
+                    ? 'bg-slate-900 text-white'
+                    : 'bg-white text-slate-500 shadow-sm hover:bg-slate-100'
+                }`}
+              >
+                {label}
+              </button>
+            ),
+          )}
+
+        </section>
+
+        <section className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+
+          <article className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
+
+            <div className="flex items-center justify-between gap-4">
+              <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-50 text-lg">
+                💰
+              </span>
+
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                {periodLabel}
+              </span>
+            </div>
+
+            <p className="mt-4 text-xs font-bold text-slate-500">
+              Pemasukan
+            </p>
+
+            <p className="mt-1 text-xl font-black text-emerald-600">
+              {formatRupiah(
+                totalIncome,
               )}
+            </p>
 
-            </article>
+          </article>
 
-          </section>
+          <article className="rounded-2xl border border-red-100 bg-white p-5 shadow-sm">
 
-          <footer className="footer">
-            CatatToko • Dashboard Keuangan UMKM
-          </footer>
+            <div className="flex items-center justify-between gap-4">
+              <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-red-50 text-lg">
+                💸
+              </span>
 
-        </div>
-      </main>
-    </>
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                {periodLabel}
+              </span>
+            </div>
+
+            <p className="mt-4 text-xs font-bold text-slate-500">
+              Pengeluaran
+            </p>
+
+            <p className="mt-1 text-xl font-black text-red-600">
+              {formatRupiah(
+                totalExpense,
+              )}
+            </p>
+
+          </article>
+
+          <article className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+
+            <div className="flex items-center justify-between gap-4">
+              <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-lg">
+                📊
+              </span>
+
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                Bersih
+              </span>
+            </div>
+
+            <p className="mt-4 text-xs font-bold text-slate-500">
+              Laba Bersih
+            </p>
+
+            <p
+              className={`mt-1 text-xl font-black ${
+                netProfit >= 0
+                  ? 'text-blue-600'
+                  : 'text-red-600'
+              }`}
+            >
+              {formatRupiah(
+                netProfit,
+              )}
+            </p>
+
+          </article>
+
+          <article className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm">
+
+            <div className="flex items-center justify-between gap-4">
+              <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-violet-50 text-lg">
+                🧾
+              </span>
+
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                {periodLabel}
+              </span>
+            </div>
+
+            <p className="mt-4 text-xs font-bold text-slate-500">
+              Transaksi
+            </p>
+
+            <p className="mt-1 text-xl font-black text-violet-600">
+              {transactionCount}
+            </p>
+
+          </article>
+
+        </section>
+
+        <section className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+
+          <button
+            type="button"
+            onClick={() =>
+              onNavigate?.(
+                'sales',
+              )
+            }
+            className="rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md"
+          >
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-lg">
+              🛒
+            </span>
+
+            <strong className="mt-3 block text-sm font-black text-slate-900">
+              Kasir
+            </strong>
+
+            <span className="mt-1 block text-[10px] text-slate-400">
+              Catat penjualan
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() =>
+              onNavigate?.(
+                'catat',
+              )
+            }
+            className="rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-md"
+          >
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-lg">
+              ➕
+            </span>
+
+            <strong className="mt-3 block text-sm font-black text-slate-900">
+              Catat
+            </strong>
+
+            <span className="mt-1 block text-[10px] text-slate-400">
+              Pemasukan / pengeluaran
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() =>
+              onNavigate?.(
+                'products',
+              )
+            }
+            className="rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-amber-200 hover:shadow-md"
+          >
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-50 text-lg">
+              📦
+            </span>
+
+            <strong className="mt-3 block text-sm font-black text-slate-900">
+              Produk
+            </strong>
+
+            <span className="mt-1 block text-[10px] text-slate-400">
+              Kelola stok barang
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() =>
+              onNavigate?.(
+                'reports',
+              )
+            }
+            className="rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-violet-200 hover:shadow-md"
+          >
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-50 text-lg">
+              📈
+            </span>
+
+            <strong className="mt-3 block text-sm font-black text-slate-900">
+              Laporan
+            </strong>
+
+            <span className="mt-1 block text-[10px] text-slate-400">
+              Lihat perkembangan
+            </span>
+          </button>
+
+        </section>
+
+        <section className="grid grid-cols-1 gap-5 xl:grid-cols-[1.5fr_1fr]">
+
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-5">
+
+              <div>
+                <h2 className="text-lg font-black text-slate-900">
+                  Transaksi Terbaru
+                </h2>
+
+                <p className="mt-1 text-xs text-slate-400">
+                  Aktivitas terakhir toko
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() =>
+                  onNavigate?.(
+                    'transactions',
+                  )
+                }
+                className="text-xs font-black text-blue-600 hover:underline"
+              >
+                Lihat Semua
+              </button>
+
+            </div>
+
+            {recentTransactions.length ===
+            0 ? (
+              <div className="flex min-h-[260px] flex-col items-center justify-center px-5 text-center">
+
+                <span className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-2xl">
+                  🧾
+                </span>
+
+                <h3 className="text-sm font-black text-slate-900">
+                  Belum ada transaksi
+                </h3>
+
+                <p className="mt-1 max-w-xs text-xs leading-5 text-slate-400">
+                  Transaksi dari Kasir
+                  atau pencatatan manual
+                  akan muncul di sini.
+                </p>
+
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-100">
+
+                {recentTransactions.map(
+                  (transaction) => {
+                    const style =
+                      getTransactionStyle(
+                        transaction.type,
+                      )
+
+                    const sign =
+                      transaction.type ===
+                      'income'
+                        ? '+'
+                        : '-'
+
+                    return (
+                      <div
+                        key={
+                          transaction.id
+                        }
+                        className="flex items-center gap-3 px-5 py-4"
+                      >
+
+                        <span
+                          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm ${style.icon}`}
+                        >
+                          {getTransactionIcon(
+                            transaction.type,
+                          )}
+                        </span>
+
+                        <div className="min-w-0 flex-1">
+
+                          <p className="truncate text-xs font-black text-slate-800">
+                            {
+                              transaction.title
+                            }
+                          </p>
+
+                          <p className="mt-1 text-[10px] text-slate-400">
+                            {
+                              transaction.date
+                            }
+                            {' • '}
+                            {
+                              transaction.time
+                            }
+                          </p>
+
+                        </div>
+
+                        <strong
+                          className={`shrink-0 text-xs font-black sm:text-sm ${style.amount}`}
+                        >
+                          {sign}
+                          {formatRupiah(
+                            transaction.amount,
+                          )}
+                        </strong>
+
+                      </div>
+                    )
+                  },
+                )}
+
+              </div>
+            )}
+
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+
+            <div className="mb-5 flex items-start justify-between gap-4">
+
+              <div>
+                <h2 className="text-lg font-black text-slate-900">
+                  Stok Menipis
+                </h2>
+
+                <p className="mt-1 text-xs text-slate-400">
+                  Perlu diperhatikan
+                </p>
+              </div>
+
+              <span className="rounded-full bg-amber-50 px-3 py-1.5 text-[10px] font-black text-amber-700">
+                {lowStockProducts.length}
+                {' '}produk
+              </span>
+
+            </div>
+
+            {lowStockProducts.length ===
+            0 ? (
+              <div className="flex min-h-[220px] flex-col items-center justify-center text-center">
+
+                <span className="mb-3 text-3xl">
+                  ✅
+                </span>
+
+                <h3 className="text-sm font-black text-slate-900">
+                  Stok aman
+                </h3>
+
+                <p className="mt-1 text-xs text-slate-400">
+                  Belum ada produk dengan
+                  stok menipis.
+                </p>
+
+              </div>
+            ) : (
+              <div className="space-y-3">
+
+                {lowStockProducts
+                  .slice(0, 6)
+                  .map((product) => (
+                    <button
+                      key={product.id}
+                      type="button"
+                      onClick={() =>
+                        onNavigate?.(
+                          'products',
+                        )
+                      }
+                      className="flex w-full items-center gap-3 rounded-xl bg-slate-50 p-3 text-left transition hover:bg-slate-100"
+                    >
+
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-lg shadow-sm">
+                        {product.icon ||
+                          '📦'}
+                      </span>
+
+                      <span className="min-w-0 flex-1">
+
+                        <strong className="block truncate text-xs font-black text-slate-800">
+                          {
+                            product.name
+                          }
+                        </strong>
+
+                        <span className="mt-1 block text-[10px] text-slate-400">
+                          Harga{' '}
+                          {formatRupiah(
+                            product.price,
+                          )}
+                        </span>
+
+                      </span>
+
+                      <span
+                        className={`shrink-0 rounded-lg px-2.5 py-1.5 text-[10px] font-black ${
+                          Number(
+                            product.stock ||
+                              0,
+                          ) <= 0
+                            ? 'bg-red-100 text-red-700'
+                            : 'bg-amber-100 text-amber-700'
+                        }`}
+                      >
+                        {Number(
+                          product.stock ||
+                            0,
+                        ) <= 0
+                          ? 'Habis'
+                          : `${product.stock} stok`}
+                      </span>
+
+                    </button>
+                  ))}
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    onNavigate?.(
+                      'products',
+                    )
+                  }
+                  className="mt-2 w-full rounded-xl border border-slate-200 py-3 text-xs font-black text-slate-600 transition hover:bg-slate-50"
+                >
+                  Kelola Semua Produk
+                </button>
+
+              </div>
+            )}
+
+          </div>
+
+        </section>
+
+        <section className="mt-5 grid grid-cols-1 gap-5 sm:grid-cols-2">
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+
+            <p className="text-xs font-bold text-slate-400">
+              Rata-rata Transaksi
+            </p>
+
+            <p className="mt-2 text-2xl font-black text-slate-900">
+              {formatRupiah(
+                averageTransaction,
+              )}
+            </p>
+
+            <p className="mt-1 text-[11px] text-slate-400">
+              Berdasarkan {periodLabel.toLowerCase()}
+            </p>
+
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+
+            <p className="text-xs font-bold text-slate-400">
+              Tabungan
+            </p>
+
+            <p className="mt-2 text-2xl font-black text-blue-600">
+              {formatRupiah(
+                totalSaving,
+              )}
+            </p>
+
+            <p className="mt-1 text-[11px] text-slate-400">
+              Dana yang dicatat sebagai
+              tabungan pada periode ini.
+            </p>
+
+          </div>
+
+        </section>
+
+        <footer className="mt-8 pb-4 text-center text-[10px] text-slate-400">
+          CatatToko • Kasir & Keuangan UMKM
+        </footer>
+
+      </div>
+    </main>
   )
 }
 

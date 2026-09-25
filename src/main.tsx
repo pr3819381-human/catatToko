@@ -1,12 +1,18 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+
 import './index.css'
+import './App.css'
+
 import App from './App'
 
-const rootElement = document.getElementById('root')
+const rootElement =
+  document.getElementById('root')
 
 if (!rootElement) {
-  throw new Error('Root element #root tidak ditemukan.')
+  throw new Error(
+    'Root element #root tidak ditemukan.',
+  )
 }
 
 createRoot(rootElement).render(

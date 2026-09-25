@@ -1,4 +1,15 @@
-import data from './data.json'
+import {
+  completeFirestoreSale,
+  getFirestoreBalance,
+  getFirestoreProducts,
+  getFirestoreTransactions,
+  initializeUserProfile,
+  replaceFirestoreProducts,
+  replaceFirestoreTransactions,
+  setFirestoreBalance,
+} from '../firebaseService'
+
+import { getCurrentUser } from '../auth'
 
 export type TransactionType =
   | 'income'
@@ -7,6 +18,7 @@ export type TransactionType =
 
 export type Transaction = {
   id: number
+  cloudId?: string
   title: string
   type: TransactionType
   amount: number
@@ -17,6 +29,7 @@ export type Transaction = {
 
 export type Product = {
   id: number
+  cloudId?: string
   name: string
   price: number
   stock: number
@@ -27,762 +40,1411 @@ export type Period =
   | 'today'
   | 'week'
   | 'month'
-
-
-/* =========================
-   STORAGE KEY
-========================= */
-
-export const TRANSACTION_KEY =
-  'catatTokoTransactions'
-
-export const PRODUCT_KEY =
-  'catatTokoProducts'
-
-export const NOTIFICATION_KEY =
-  'catatTokoNotifications'
-
-export const BALANCE_KEY =
-  'catatTokoBalance'
+  | 'all'
 
 export const DATA_CHANGED_EVENT =
   'catatTokoDataChanged'
 
+const TRANSACTIONS_CACHE_KEY =
+  'catatTokoTransactions'
 
-/* =========================
-   DATA CHANGE EVENT
-========================= */
+const PRODUCTS_CACHE_KEY =
+  'catatTokoProducts'
 
-export function notifyDataChanged() {
-  window.dispatchEvent(
-    new CustomEvent(DATA_CHANGED_EVENT)
-  )
-}
+const BALANCE_CACHE_KEY =
+  'catatTokoBalance'
 
+let currentUserId:
+  string | null =
+    null
 
-/* =========================
-   DEFAULT DATA
-========================= */
+let transactionsCache:
+  Transaction[] = []
 
-const defaultTransactions =
-  data.transactions as Transaction[]
+let productsCache:
+  Product[] = []
 
-const defaultProducts =
-  data.products as Product[]
+let balanceCache =
+  0
 
-const defaultBalance =
-  Number(data.dashboard?.balance || 0)
+let cloudInitialized =
+  false
 
+let cloudWriteQueue:
+  Promise<void> =
+    Promise.resolve()
 
-/* =========================
-   BALANCE
-========================= */
+/* =========================================================
+   EVENTS
+========================================================= */
 
-export function getBalance(): number {
-  const stored =
-    localStorage.getItem(BALANCE_KEY)
-
-  if (stored === null) {
-    localStorage.setItem(
-      BALANCE_KEY,
-      String(defaultBalance)
-    )
-
-    return defaultBalance
-  }
-
-  const balance =
-    Number(stored)
-
-  if (Number.isNaN(balance)) {
-    localStorage.setItem(
-      BALANCE_KEY,
-      String(defaultBalance)
-    )
-
-    return defaultBalance
-  }
-
-  return balance
-}
-
-
-export function saveBalance(
-  balance: number
-) {
-  localStorage.setItem(
-    BALANCE_KEY,
-    String(balance)
-  )
-
-  notifyDataChanged()
-}
-
-
-/* =========================
-   UPDATE BALANCE
-========================= */
-
-export function updateBalance(
-  transaction: {
-    type: TransactionType
-    amount: number
-  }
-) {
-  const currentBalance =
-    getBalance()
-
-  let newBalance =
-    currentBalance
-
+function dispatchDataChanged() {
   if (
-    transaction.type ===
-    'income'
+    typeof window !==
+    'undefined'
   ) {
-    newBalance +=
-      transaction.amount
+    window.dispatchEvent(
+      new Event(
+        DATA_CHANGED_EVENT,
+      ),
+    )
   }
-
-  if (
-    transaction.type ===
-    'expense'
-  ) {
-    newBalance -=
-      transaction.amount
-  }
-
-  saveBalance(newBalance)
-
-  return newBalance
 }
 
+/* =========================================================
+   USER
+========================================================= */
 
-/* =========================
-   TRANSACTIONS
-========================= */
+function getRequiredUserId(): string {
+  const user =
+    getCurrentUser()
 
-export function getTransactions():
-  Transaction[] {
-
-  const stored =
-    localStorage.getItem(
-      TRANSACTION_KEY
+  if (!user) {
+    throw new Error(
+      'Pengguna belum login.',
     )
-
-  /*
-   * BELUM ADA STORAGE
-   * gunakan data default
-   */
-  if (!stored) {
-
-    localStorage.setItem(
-      TRANSACTION_KEY,
-      JSON.stringify(
-        defaultTransactions
-      )
-    )
-
-    return defaultTransactions
   }
 
+  return user.uid
+}
+
+function getUserCacheKey(
+  baseKey: string,
+): string {
+  if (
+    !currentUserId
+  ) {
+    return baseKey
+  }
+
+  return `${baseKey}_${currentUserId}`
+}
+
+/* =========================================================
+   CACHE
+========================================================= */
+
+function writeCache(
+  key: string,
+  value: unknown,
+) {
   try {
-
-    const transactions =
-      JSON.parse(stored)
-
-    if (
-      !Array.isArray(
-        transactions
-      )
-    ) {
-
-      localStorage.setItem(
-        TRANSACTION_KEY,
-        JSON.stringify(
-          defaultTransactions
-        )
-      )
-
-      return defaultTransactions
-    }
-
-    return transactions
-
-  } catch {
-
     localStorage.setItem(
-      TRANSACTION_KEY,
-      JSON.stringify(
-        defaultTransactions
-      )
+      key,
+      JSON.stringify(value),
     )
-
-    return defaultTransactions
+  } catch {
+    /*
+      localStorage hanya cache UI.
+      Firestore tetap menjadi
+      sumber data utama.
+    */
   }
 }
 
+/* =========================================================
+   ID
+========================================================= */
 
-export function saveTransactions(
-  transactions: Transaction[]
-) {
-  localStorage.setItem(
-    TRANSACTION_KEY,
-    JSON.stringify(
-      transactions
-    )
+function createStableNumericId(
+  value: string,
+): number {
+  let hash =
+    0
+
+  for (
+    let index = 0;
+    index <
+    value.length;
+    index += 1
+  ) {
+    hash =
+      (hash << 5) -
+      hash +
+      value.charCodeAt(
+        index,
+      )
+
+    hash |= 0
+  }
+
+  return (
+    Math.abs(hash) ||
+    Date.now()
   )
-
-  notifyDataChanged()
 }
 
+/* =========================================================
+   DATE
+========================================================= */
 
-/* =========================
-   ADD TRANSACTION
-========================= */
+function formatDate(
+  date: Date,
+): string {
+  const year =
+    date.getFullYear()
 
-export function addTransaction(
+  const month =
+    String(
+      date.getMonth() + 1,
+    ).padStart(
+      2,
+      '0',
+    )
+
+  const day =
+    String(
+      date.getDate(),
+    ).padStart(
+      2,
+      '0',
+    )
+
+  return `${year}-${month}-${day}`
+}
+
+function formatTime(
+  date: Date,
+): string {
+  const hours =
+    String(
+      date.getHours(),
+    ).padStart(
+      2,
+      '0',
+    )
+
+  const minutes =
+    String(
+      date.getMinutes(),
+    ).padStart(
+      2,
+      '0',
+    )
+
+  return `${hours}:${minutes}`
+}
+
+function normalizeDateTime(
+  date?: string,
+  createdAt?: unknown,
+) {
+  const source =
+    date ||
+    (
+      typeof createdAt ===
+      'string'
+        ? createdAt
+        : ''
+    )
+
+  const parsed =
+    source
+      ? new Date(
+          source,
+        )
+      : new Date()
+
+  const valid =
+    Number.isNaN(
+      parsed.getTime(),
+    )
+      ? new Date()
+      : parsed
+
+  return {
+    date:
+      formatDate(
+        valid,
+      ),
+
+    time:
+      formatTime(
+        valid,
+      ),
+  }
+}
+
+/* =========================================================
+   FIRESTORE → LOCAL
+========================================================= */
+
+function firestoreTransactionToLocal(
   transaction: {
-    title: string
+    id?: string
     type: TransactionType
     amount: number
-  }
-) {
+    description: string
+    date?: string
+    createdAt?: unknown
+  },
+): Transaction {
+  const {
+    date,
+    time,
+  } =
+    normalizeDateTime(
+      transaction.date,
+      transaction.createdAt,
+    )
 
-  const transactions =
-    getTransactions()
+  const createdAt =
+    typeof transaction.createdAt ===
+    'string'
+      ? transaction.createdAt
+      : transaction.date ||
+        new Date(
+          `${date}T${time}:00`,
+        ).toISOString()
 
-  const now =
-    new Date()
-
-  const newTransaction:
-    Transaction = {
-
+  return {
     id:
-      Date.now(),
+      transaction.id
+        ? createStableNumericId(
+            transaction.id,
+          )
+        : Date.now(),
+
+    cloudId:
+      transaction.id,
 
     title:
-      transaction.title,
+      transaction.description ||
+      'Transaksi',
 
     type:
       transaction.type,
 
     amount:
-      transaction.amount,
+      Number(
+        transaction.amount,
+      ) || 0,
+
+    date,
+
+    time,
+
+    createdAt,
+  }
+}
+
+function firestoreProductToLocal(
+  product: {
+    id?: string
+    name: string
+    price: number
+    stock: number
+    icon?: string
+  },
+): Product {
+  return {
+    id:
+      product.id
+        ? createStableNumericId(
+            product.id,
+          )
+        : Date.now(),
+
+    cloudId:
+      product.id,
+
+    name:
+      product.name,
+
+    price:
+      Number(
+        product.price,
+      ) || 0,
+
+    stock:
+      Math.max(
+        0,
+        Number(
+          product.stock,
+        ) || 0,
+      ),
+
+    icon:
+      product.icon ||
+      '📦',
+  }
+}
+
+/* =========================================================
+   LOCAL → FIRESTORE
+========================================================= */
+
+function localTransactionToFirestore(
+  transaction: Transaction,
+) {
+  return {
+    type:
+      transaction.type,
+
+    amount:
+      Number(
+        transaction.amount,
+      ) || 0,
+
+    description:
+      transaction.title,
 
     date:
-      now.toLocaleDateString(
-        'id-ID'
+      `${transaction.date}T${transaction.time}:00`,
+
+    createdAt:
+      transaction.createdAt ||
+      new Date().toISOString(),
+  }
+}
+
+function localProductToFirestore(
+  product: Product,
+) {
+  return {
+    name:
+      product.name,
+
+    price:
+      Number(
+        product.price,
+      ) || 0,
+
+    stock:
+      Math.max(
+        0,
+        Number(
+          product.stock,
+        ) || 0,
+      ),
+
+    icon:
+      product.icon ||
+      '📦',
+  }
+}
+
+/* =========================================================
+   CLOUD WRITE QUEUE
+========================================================= */
+
+function enqueueCloudWrite(
+  operation: () => Promise<void>,
+) {
+  cloudWriteQueue =
+    cloudWriteQueue
+      .then(
+        operation,
+      )
+      .catch(
+        (error) => {
+          console.error(
+            'Gagal sinkronisasi CatatToko:',
+            error,
+          )
+        },
+      )
+
+  return cloudWriteQueue
+}
+
+async function syncTransactions() {
+  if (
+    !getCurrentUser()
+  ) {
+    return
+  }
+
+  await replaceFirestoreTransactions(
+    transactionsCache.map(
+      localTransactionToFirestore,
+    ),
+  )
+}
+
+/*
+  PENTING:
+  Setelah produk ditulis ke Firestore,
+  kita langsung membaca kembali produk dari Firestore.
+  Dengan begitu setiap produk memperoleh cloudId.
+*/
+async function syncProducts() {
+  if (
+    !getCurrentUser()
+  ) {
+    return
+  }
+
+  await replaceFirestoreProducts(
+    productsCache.map(
+      localProductToFirestore,
+    ),
+  )
+
+  const cloudProducts =
+    await getFirestoreProducts()
+
+  productsCache =
+    cloudProducts.map(
+      firestoreProductToLocal,
+    )
+
+  writeCache(
+    getUserCacheKey(
+      PRODUCTS_CACHE_KEY,
+    ),
+    productsCache,
+  )
+
+  dispatchDataChanged()
+}
+
+async function syncBalance() {
+  if (
+    !getCurrentUser()
+  ) {
+    return
+  }
+
+  await setFirestoreBalance(
+    balanceCache,
+  )
+}
+
+/* =========================================================
+   TRANSACTIONS
+========================================================= */
+
+export function getTransactions(): Transaction[] {
+  return [
+    ...transactionsCache,
+  ]
+}
+
+export function saveTransactions(
+  transactions: Transaction[],
+): void {
+  transactionsCache =
+    transactions.map(
+      (item) => ({
+        ...item,
+
+        amount:
+          Number(
+            item.amount,
+          ) || 0,
+      }),
+    )
+
+  writeCache(
+    getUserCacheKey(
+      TRANSACTIONS_CACHE_KEY,
+    ),
+    transactionsCache,
+  )
+
+  dispatchDataChanged()
+
+  void enqueueCloudWrite(
+    syncTransactions,
+  )
+}
+
+export function addTransaction(
+  input: Omit<
+    Transaction,
+    'id' | 'date' | 'time'
+  > & {
+    date?: string
+    time?: string
+  },
+): Transaction {
+  const now =
+    new Date()
+
+  const transaction:
+    Transaction = {
+    id:
+      Date.now() +
+      Math.floor(
+        Math.random() *
+          1000,
+      ),
+
+    title:
+      input.title.trim() ||
+      'Transaksi',
+
+    type:
+      input.type,
+
+    amount:
+      Math.max(
+        0,
+        Number(
+          input.amount,
+        ) || 0,
+      ),
+
+    date:
+      input.date ||
+      formatDate(
+        now,
       ),
 
     time:
-      now.toLocaleTimeString(
-        'id-ID',
-        {
-          hour: '2-digit',
-          minute: '2-digit'
-        }
+      input.time ||
+      formatTime(
+        now,
       ),
 
     createdAt:
-      now.toISOString()
+      input.createdAt ||
+      now.toISOString(),
   }
 
-
-  const updatedTransactions = [
-    newTransaction,
-    ...transactions
+  transactionsCache = [
+    transaction,
+    ...transactionsCache,
   ]
 
-  saveTransactions(
-    updatedTransactions
+  if (
+    transaction.type ===
+    'income'
+  ) {
+    balanceCache +=
+      transaction.amount
+  }
+
+  if (
+    transaction.type ===
+    'expense'
+  ) {
+    balanceCache -=
+      transaction.amount
+  }
+
+  writeCache(
+    getUserCacheKey(
+      TRANSACTIONS_CACHE_KEY,
+    ),
+    transactionsCache,
   )
 
-  updateBalance(
-    newTransaction
+  writeCache(
+    getUserCacheKey(
+      BALANCE_CACHE_KEY,
+    ),
+    balanceCache,
   )
 
-  return newTransaction
+  dispatchDataChanged()
+
+  void enqueueCloudWrite(
+    async () => {
+      await syncTransactions()
+      await syncBalance()
+    },
+  )
+
+  return transaction
 }
-
-
-/* =========================
-   UPDATE TRANSACTION
-========================= */
 
 export function updateTransaction(
-  updatedTransaction: Transaction
-) {
-
-  const transactions =
-    getTransactions()
-
-  const oldTransaction =
-    transactions.find(
-      transaction =>
-        transaction.id ===
-        updatedTransaction.id
+  updatedTransaction: Transaction,
+): void {
+  const previous =
+    transactionsCache.find(
+      (item) =>
+        item.id ===
+        updatedTransaction.id,
     )
 
-  if (!oldTransaction) {
-    return false
+  if (!previous) {
+    return
   }
 
-
-  /*
-   * BALIKKAN EFEK TRANSAKSI LAMA
-   */
-
   if (
-    oldTransaction.type ===
+    previous.type ===
     'income'
   ) {
-
-    saveBalance(
-      getBalance() -
-      oldTransaction.amount
-    )
+    balanceCache -=
+      previous.amount
   }
 
   if (
-    oldTransaction.type ===
+    previous.type ===
     'expense'
   ) {
-
-    saveBalance(
-      getBalance() +
-      oldTransaction.amount
-    )
+    balanceCache +=
+      previous.amount
   }
 
+  if (
+    updatedTransaction.type ===
+    'income'
+  ) {
+    balanceCache +=
+      updatedTransaction.amount
+  }
 
-  /*
-   * SIMPAN TRANSAKSI BARU
-   */
+  if (
+    updatedTransaction.type ===
+    'expense'
+  ) {
+    balanceCache -=
+      updatedTransaction.amount
+  }
 
-  const updatedTransactions =
-    transactions.map(
-      transaction =>
-        transaction.id ===
+  transactionsCache =
+    transactionsCache.map(
+      (item) =>
+        item.id ===
         updatedTransaction.id
-          ? updatedTransaction
-          : transaction
+          ? {
+              ...updatedTransaction,
+
+              amount:
+                Math.max(
+                  0,
+                  Number(
+                    updatedTransaction.amount,
+                  ) || 0,
+                ),
+
+              title:
+                updatedTransaction.title.trim() ||
+                'Transaksi',
+
+              createdAt:
+                updatedTransaction.createdAt ||
+                item.createdAt ||
+                new Date().toISOString(),
+            }
+          : item,
     )
 
-  saveTransactions(
-    updatedTransactions
+  writeCache(
+    getUserCacheKey(
+      TRANSACTIONS_CACHE_KEY,
+    ),
+    transactionsCache,
   )
 
+  writeCache(
+    getUserCacheKey(
+      BALANCE_CACHE_KEY,
+    ),
+    balanceCache,
+  )
 
-  /*
-   * TERAPKAN EFEK BARU
-   */
+  dispatchDataChanged()
 
-  if (
-    updatedTransaction.type ===
-    'income'
-  ) {
-
-    saveBalance(
-      getBalance() +
-      updatedTransaction.amount
-    )
-  }
-
-  if (
-    updatedTransaction.type ===
-    'expense'
-  ) {
-
-    saveBalance(
-      getBalance() -
-      updatedTransaction.amount
-    )
-  }
-
-  notifyDataChanged()
-
-  return true
+  void enqueueCloudWrite(
+    async () => {
+      await syncTransactions()
+      await syncBalance()
+    },
+  )
 }
 
-
-/* =========================
-   DELETE TRANSACTION
-========================= */
-
 export function deleteTransaction(
-  transactionId: number
-) {
-
-  const transactions =
-    getTransactions()
-
+  id: number,
+): void {
   const transaction =
-    transactions.find(
-      item =>
-        item.id ===
-        transactionId
+    transactionsCache.find(
+      (item) =>
+        item.id === id,
     )
 
   if (!transaction) {
-    return false
+    return
   }
-
-
-  /*
-   * BALIKKAN EFEK SALDO
-   */
 
   if (
     transaction.type ===
     'income'
   ) {
-
-    saveBalance(
-      getBalance() -
+    balanceCache -=
       transaction.amount
-    )
   }
 
   if (
     transaction.type ===
     'expense'
   ) {
-
-    saveBalance(
-      getBalance() +
+    balanceCache +=
       transaction.amount
-    )
   }
 
-
-  /*
-   * HAPUS TRANSAKSI
-   */
-
-  const updatedTransactions =
-    transactions.filter(
-      item =>
-        item.id !==
-        transactionId
+  transactionsCache =
+    transactionsCache.filter(
+      (item) =>
+        item.id !== id,
     )
 
-  saveTransactions(
-    updatedTransactions
+  writeCache(
+    getUserCacheKey(
+      TRANSACTIONS_CACHE_KEY,
+    ),
+    transactionsCache,
   )
 
-  notifyDataChanged()
+  writeCache(
+    getUserCacheKey(
+      BALANCE_CACHE_KEY,
+    ),
+    balanceCache,
+  )
 
-  return true
+  dispatchDataChanged()
+
+  void enqueueCloudWrite(
+    async () => {
+      await syncTransactions()
+      await syncBalance()
+    },
+  )
 }
 
+/* =========================================================
+   BALANCE
+========================================================= */
 
-/* =========================
+export function getBalance(): number {
+  return balanceCache
+}
+
+export function saveBalance(
+  balance: number,
+): void {
+  balanceCache =
+    Number.isFinite(
+      balance,
+    )
+      ? balance
+      : 0
+
+  writeCache(
+    getUserCacheKey(
+      BALANCE_CACHE_KEY,
+    ),
+    balanceCache,
+  )
+
+  dispatchDataChanged()
+
+  void enqueueCloudWrite(
+    syncBalance,
+  )
+}
+
+export function updateBalance(
+  transaction: Transaction,
+): void {
+  if (
+    transaction.type ===
+    'income'
+  ) {
+    balanceCache +=
+      transaction.amount
+  }
+
+  if (
+    transaction.type ===
+    'expense'
+  ) {
+    balanceCache -=
+      transaction.amount
+  }
+
+  writeCache(
+    getUserCacheKey(
+      BALANCE_CACHE_KEY,
+    ),
+    balanceCache,
+  )
+
+  dispatchDataChanged()
+
+  void enqueueCloudWrite(
+    syncBalance,
+  )
+}
+
+/* =========================================================
    PRODUCTS
-========================= */
+========================================================= */
 
-export function getProducts():
-  Product[] {
-
-  const stored =
-    localStorage.getItem(
-      PRODUCT_KEY
-    )
-
-
-  /*
-   * INI BAGIAN PENTING
-   *
-   * Kalau localStorage kosong,
-   * otomatis masukkan produk
-   * dari data.json.
-   */
-
-  if (!stored) {
-
-    localStorage.setItem(
-      PRODUCT_KEY,
-      JSON.stringify(
-        defaultProducts
-      )
-    )
-
-    return defaultProducts
-  }
-
-
-  try {
-
-    const products =
-      JSON.parse(stored)
-
-
-    if (
-      !Array.isArray(
-        products
-      )
-    ) {
-
-      localStorage.setItem(
-        PRODUCT_KEY,
-        JSON.stringify(
-          defaultProducts
-        )
-      )
-
-      return defaultProducts
-    }
-
-
-    return products
-
-  } catch {
-
-    localStorage.setItem(
-      PRODUCT_KEY,
-      JSON.stringify(
-        defaultProducts
-      )
-    )
-
-    return defaultProducts
-  }
+export function getProducts(): Product[] {
+  return [
+    ...productsCache,
+  ]
 }
-
-
-/* =========================
-   SAVE PRODUCTS
-========================= */
 
 export function saveProducts(
-  products: Product[]
-) {
+  products: Product[],
+): void {
+  productsCache =
+    products.map(
+      (product) => ({
+        ...product,
 
-  localStorage.setItem(
-    PRODUCT_KEY,
-    JSON.stringify(
-      products
+        price:
+          Math.max(
+            0,
+            Number(
+              product.price,
+            ) || 0,
+          ),
+
+        stock:
+          Math.max(
+            0,
+            Number(
+              product.stock,
+            ) || 0,
+          ),
+
+        icon:
+          product.icon ||
+          '📦',
+      }),
     )
+
+  writeCache(
+    getUserCacheKey(
+      PRODUCTS_CACHE_KEY,
+    ),
+    productsCache,
   )
 
-  notifyDataChanged()
+  dispatchDataChanged()
+
+  void enqueueCloudWrite(
+    syncProducts,
+  )
 }
-
-
-/* =========================
-   UPDATE PRODUCT STOCK
-========================= */
 
 export function updateProductStock(
   productId: number,
-  quantityChange: number
-) {
-
-  const products =
-    getProducts()
-
-  const product =
-    products.find(
-      item =>
-        item.id ===
+  amount: number,
+): void {
+  productsCache =
+    productsCache.map(
+      (product) =>
+        product.id ===
         productId
-    )
-
-  if (!product) {
-    return false
-  }
-
-
-  const newStock =
-    product.stock +
-    quantityChange
-
-
-  if (newStock < 0) {
-    return false
-  }
-
-
-  const updatedProducts =
-    products.map(
-      item =>
-        item.id === productId
           ? {
-              ...item,
-              stock: newStock
+              ...product,
+
+              stock:
+                Math.max(
+                  0,
+                  product.stock +
+                    amount,
+                ),
             }
-          : item
+          : product,
     )
 
-
-  saveProducts(
-    updatedProducts
+  writeCache(
+    getUserCacheKey(
+      PRODUCTS_CACHE_KEY,
+    ),
+    productsCache,
   )
 
-  return true
+  dispatchDataChanged()
+
+  void enqueueCloudWrite(
+    syncProducts,
+  )
 }
 
+/* =========================================================
+   ATOMIC SALE
+========================================================= */
 
-/* =========================
-   FORMAT RUPIAH
-========================= */
-
-export function formatRupiah(
-  amount: number
-): string {
-
-  return new Intl.NumberFormat(
-    'id-ID',
-    {
-      style: 'currency',
-      currency: 'IDR',
-      minimumFractionDigits: 0
-    }
-  ).format(amount)
+export type SaleItemInput = {
+  productId: number
+  quantity: number
 }
 
+export async function completeSale(
+  items: SaleItemInput[],
+): Promise<Transaction> {
+  if (
+    !items.length
+  ) {
+    throw new Error(
+      'Keranjang penjualan kosong.',
+    )
+  }
 
-/* =========================
-   PERIOD
-========================= */
+  if (
+    !getCurrentUser()
+  ) {
+    throw new Error(
+      'Pengguna belum login.',
+    )
+  }
 
-export function isInPeriod(
-  dateString: string,
-  period: Period
-): boolean {
+  const cloudItems =
+    items.map(
+      (item) => {
+        const product =
+          productsCache.find(
+            (candidate) =>
+              candidate.id ===
+              item.productId,
+          )
+
+        if (!product) {
+          throw new Error(
+            'Salah satu produk sudah tidak tersedia.',
+          )
+        }
+
+        if (!product.cloudId) {
+          throw new Error(
+            `Produk "${product.name}" belum memiliki ID cloud. Muat ulang data lalu coba lagi.`,
+          )
+        }
+
+        const quantity =
+          Math.floor(
+            Number(
+              item.quantity,
+            ),
+          )
+
+        if (
+          !Number.isInteger(
+            quantity,
+          ) ||
+          quantity <= 0
+        ) {
+          throw new Error(
+            `Jumlah ${product.name} tidak valid.`,
+          )
+        }
+
+        if (
+          product.stock <
+          quantity
+        ) {
+          throw new Error(
+            `Stok ${product.name} tidak mencukupi. Tersisa ${product.stock}.`,
+          )
+        }
+
+        return {
+          productId:
+            product.cloudId,
+
+          quantity,
+
+          product,
+        }
+      },
+    )
+
+  const productNames =
+    cloudItems
+      .map(
+        (item) =>
+          `${item.product.name} x${item.quantity}`,
+      )
+      .join(', ')
+
+  const total =
+    cloudItems.reduce(
+      (
+        sum,
+        item,
+      ) =>
+        sum +
+        item.product.price *
+          item.quantity,
+      0,
+    )
+
+  if (
+    total <= 0
+  ) {
+    throw new Error(
+      'Total penjualan tidak valid.',
+    )
+  }
 
   const now =
     new Date()
 
-  /*
-   * Format transaksi:
-   * DD/MM/YYYY
-   */
+  const result =
+    await completeFirestoreSale(
+      cloudItems.map(
+        (item) => ({
+          productId:
+            item.productId,
 
-  const parts =
-    dateString.split('/')
+          quantity:
+            item.quantity,
+        }),
+      ),
+      {
+        type:
+          'income',
+
+        amount:
+          total,
+
+        description:
+          `Penjualan - ${productNames}`,
+
+        date:
+          now.toISOString(),
+      },
+    )
+
+  const transaction:
+    Transaction = {
+    id:
+      createStableNumericId(
+        result.transactionId,
+      ),
+
+    cloudId:
+      result.transactionId,
+
+    title:
+      `Penjualan - ${productNames}`,
+
+    type:
+      'income',
+
+    amount:
+      total,
+
+    date:
+      formatDate(
+        now,
+      ),
+
+    time:
+      formatTime(
+        now,
+      ),
+
+    createdAt:
+      now.toISOString(),
+  }
+
+  transactionsCache = [
+    transaction,
+    ...transactionsCache,
+  ]
+
+  productsCache =
+    productsCache.map(
+      (product) => {
+        const sold =
+          cloudItems.find(
+            (item) =>
+              item.product.id ===
+              product.id,
+          )
+
+        return sold
+          ? {
+              ...product,
+
+              stock:
+                Math.max(
+                  0,
+                  product.stock -
+                    sold.quantity,
+                ),
+            }
+          : product
+      },
+    )
+
+  balanceCache =
+    result.balance
+
+  writeCache(
+    getUserCacheKey(
+      TRANSACTIONS_CACHE_KEY,
+    ),
+    transactionsCache,
+  )
+
+  writeCache(
+    getUserCacheKey(
+      PRODUCTS_CACHE_KEY,
+    ),
+    productsCache,
+  )
+
+  writeCache(
+    getUserCacheKey(
+      BALANCE_CACHE_KEY,
+    ),
+    balanceCache,
+  )
+
+  dispatchDataChanged()
+
+  return transaction
+}
+
+/* =========================================================
+   FORMAT RUPIAH
+========================================================= */
+
+export function formatRupiah(
+  amount: number,
+): string {
+  return new Intl.NumberFormat(
+    'id-ID',
+    {
+      style:
+        'currency',
+
+      currency:
+        'IDR',
+
+      maximumFractionDigits:
+        0,
+    },
+  ).format(
+    Number(
+      amount,
+    ) || 0,
+  )
+}
+
+/* =========================================================
+   PERIOD
+========================================================= */
+
+export function isInPeriod(
+  dateString: string,
+  period: Period,
+): boolean {
+  if (
+    period === 'all'
+  ) {
+    return true
+  }
+
+  const transactionDate =
+    new Date(
+      dateString,
+    )
 
   if (
-    parts.length !== 3
+    Number.isNaN(
+      transactionDate.getTime(),
+    )
   ) {
     return false
   }
 
-
-  const day =
-    Number(parts[0])
-
-  const month =
-    Number(parts[1]) - 1
-
-  const year =
-    Number(parts[2])
-
-
-  const transactionDate =
-    new Date(
-      year,
-      month,
-      day
-    )
-
-
-  /*
-   * HARI INI
-   */
+  const now =
+    new Date()
 
   if (
     period === 'today'
   ) {
-
     return (
-      transactionDate.getDate() ===
-        now.getDate() &&
-
+      transactionDate.getFullYear() ===
+        now.getFullYear() &&
       transactionDate.getMonth() ===
         now.getMonth() &&
-
-      transactionDate.getFullYear() ===
-        now.getFullYear()
+      transactionDate.getDate() ===
+        now.getDate()
     )
   }
-
-
-  /*
-   * MINGGU INI
-   */
-
-  if (
-    period === 'week'
-  ) {
-
-    const startOfWeek =
-      new Date(now)
-
-    const dayOfWeek =
-      now.getDay()
-
-    const difference =
-      dayOfWeek === 0
-        ? 6
-        : dayOfWeek - 1
-
-    startOfWeek.setDate(
-      now.getDate() -
-      difference
-    )
-
-    startOfWeek.setHours(
-      0,
-      0,
-      0,
-      0
-    )
-
-
-    const endOfWeek =
-      new Date(
-        startOfWeek
-      )
-
-    endOfWeek.setDate(
-      startOfWeek.getDate() +
-      6
-    )
-
-    endOfWeek.setHours(
-      23,
-      59,
-      59,
-      999
-    )
-
-
-    return (
-      transactionDate >=
-        startOfWeek &&
-      transactionDate <=
-        endOfWeek
-    )
-  }
-
-
-  /*
-   * BULAN INI
-   */
 
   if (
     period === 'month'
   ) {
-
     return (
-      transactionDate.getMonth() ===
-        now.getMonth() &&
-
       transactionDate.getFullYear() ===
-        now.getFullYear()
+        now.getFullYear() &&
+      transactionDate.getMonth() ===
+        now.getMonth()
     )
   }
 
+  const startOfWeek =
+    new Date(
+      now,
+    )
 
-  return true
+  const day =
+    startOfWeek.getDay()
+
+  const diff =
+    day === 0
+      ? 6
+      : day - 1
+
+  startOfWeek.setDate(
+    startOfWeek.getDate() -
+      diff,
+  )
+
+  startOfWeek.setHours(
+    0,
+    0,
+    0,
+    0,
+  )
+
+  return (
+    transactionDate >=
+    startOfWeek
+  )
+}
+
+/* =========================================================
+   NO DEMO DATA
+========================================================= */
+
+// CatatToko dimulai kosong.
+// Data hanya berasal dari Firestore.
+
+/* =========================================================
+   FIREBASE INITIALIZATION
+========================================================= */
+
+export async function initializeCloudData(): Promise<void> {
+  const userId =
+    getRequiredUserId()
+
+  if (
+    cloudInitialized &&
+    currentUserId ===
+      userId
+  ) {
+    return
+  }
+
+  currentUserId =
+    userId
+
+  cloudInitialized =
+    false
+
+  transactionsCache =
+    []
+
+  productsCache =
+    []
+
+  balanceCache =
+    0
+
+  cloudWriteQueue =
+    Promise.resolve()
+
+  await initializeUserProfile()
+
+  const [
+    cloudTransactions,
+    cloudProducts,
+    cloudBalance,
+  ] =
+    await Promise.all([
+      getFirestoreTransactions(),
+      getFirestoreProducts(),
+      getFirestoreBalance(),
+    ])
+
+  transactionsCache =
+    cloudTransactions.map(
+      firestoreTransactionToLocal,
+    )
+
+  productsCache =
+    cloudProducts.map(
+      firestoreProductToLocal,
+    )
+
+  balanceCache =
+    cloudBalance !== null &&
+    Number.isFinite(
+      Number(
+        cloudBalance,
+      ),
+    )
+      ? Number(
+          cloudBalance,
+        )
+      : 0
+
+  writeCache(
+    getUserCacheKey(
+      TRANSACTIONS_CACHE_KEY,
+    ),
+    transactionsCache,
+  )
+
+  writeCache(
+    getUserCacheKey(
+      PRODUCTS_CACHE_KEY,
+    ),
+    productsCache,
+  )
+
+  writeCache(
+    getUserCacheKey(
+      BALANCE_CACHE_KEY,
+    ),
+    balanceCache,
+  )
+
+  cloudInitialized =
+    true
+
+  dispatchDataChanged()
+}
+
+/* =========================================================
+   RESET SESSION
+========================================================= */
+
+export function resetCloudSession(): void {
+  currentUserId =
+    null
+
+  cloudInitialized =
+    false
+
+  transactionsCache =
+    []
+
+  productsCache =
+    []
+
+  balanceCache =
+    0
+
+  cloudWriteQueue =
+    Promise.resolve()
+}
+
+/* =========================================================
+   STATUS
+========================================================= */
+
+export function isCloudInitialized(): boolean {
+  return cloudInitialized
+}
+
+export function getCurrentStorageUserId(): string | null {
+  return currentUserId
 }

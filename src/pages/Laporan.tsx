@@ -1,11 +1,23 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import data from '../data/data.json'
 import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+} from 'react'
+
+import data from '../data/data.json'
+
+import {
+  DATA_CHANGED_EVENT,
   formatRupiah,
   getBalance,
   getProducts,
   getTransactions,
   isInPeriod,
+  saveBalance,
+  saveProducts,
+  saveTransactions,
   type Period,
   type Product,
   type Transaction,
@@ -14,8 +26,6 @@ import {
 type LaporanProps = {
   onNavigate?: (page: string) => void
 }
-
-type ReportPeriod = Period | 'all'
 
 type BackupData = {
   app: string
@@ -27,21 +37,47 @@ type BackupData = {
   products: Product[]
 }
 
-function Laporan({ onNavigate }: LaporanProps) {
+type PeriodOption = {
+  value: Period
+  label: string
+}
+
+const PERIOD_OPTIONS: PeriodOption[] = [
+  {
+    value: 'today',
+    label: 'Hari Ini',
+  },
+  {
+    value: 'week',
+    label: 'Minggu Ini',
+  },
+  {
+    value: 'month',
+    label: 'Bulan Ini',
+  },
+  {
+    value: 'all',
+    label: 'Semua',
+  },
+]
+
+function Laporan({
+  onNavigate,
+}: LaporanProps) {
   const [period, setPeriod] =
-    useState<ReportPeriod>('month')
+    useState<Period>('month')
 
-  const [transactions, setTransactions] = useState<
-    Transaction[]
-  >(getTransactions())
+  const [transactions, setTransactions] =
+    useState<Transaction[]>([])
 
-  const [products, setProducts] = useState<Product[]>(
-    getProducts(),
-  )
+  const [products, setProducts] =
+    useState<Product[]>([])
 
-  const [balance, setBalance] = useState(getBalance())
+  const [balance, setBalance] =
+    useState(0)
 
-  const [showBackup, setShowBackup] = useState(false)
+  const [showBackup, setShowBackup] =
+    useState(false)
 
   const [restoreMessage, setRestoreMessage] =
     useState('')
@@ -53,12 +89,23 @@ function Laporan({ onNavigate }: LaporanProps) {
     useRef<HTMLInputElement | null>(null)
 
   /*
+   * =========================================
    * LOAD DATA
+   * =========================================
    */
+
   const loadData = () => {
-    setTransactions(getTransactions())
-    setProducts(getProducts())
-    setBalance(getBalance())
+    setTransactions(
+      getTransactions(),
+    )
+
+    setProducts(
+      getProducts(),
+    )
+
+    setBalance(
+      getBalance(),
+    )
   }
 
   useEffect(() => {
@@ -69,200 +116,238 @@ function Laporan({ onNavigate }: LaporanProps) {
     }
 
     window.addEventListener(
-      'catatTokoDataChanged',
+      DATA_CHANGED_EVENT,
       handleDataChanged,
     )
 
     return () => {
       window.removeEventListener(
-        'catatTokoDataChanged',
+        DATA_CHANGED_EVENT,
         handleDataChanged,
       )
     }
   }, [])
 
   /*
+   * =========================================
    * FILTER TRANSACTIONS
+   * =========================================
    */
-  const filteredTransactions = useMemo(() => {
-    if (period === 'all') {
-      return transactions
-    }
 
-    return transactions.filter((transaction) =>
-      isInPeriod(transaction.date, period),
-    )
-  }, [transactions, period])
+  const filteredTransactions =
+    useMemo(() => {
+      return transactions.filter(
+        (transaction) =>
+          isInPeriod(
+            transaction.createdAt ||
+              transaction.date,
+            period,
+          ),
+      )
+    }, [transactions, period])
 
   /*
-   * TOTAL INCOME
+   * =========================================
+   * PEMASUKAN
+   * =========================================
    */
-  const totalIncome = useMemo(() => {
-    return filteredTransactions
-      .filter(
+
+  const incomeTransactions =
+    useMemo(() => {
+      return filteredTransactions.filter(
         (transaction) =>
-          transaction.type === 'income',
+          transaction.type ===
+          'income',
       )
-      .reduce(
+    }, [filteredTransactions])
+
+  const totalIncome =
+    useMemo(() => {
+      return incomeTransactions.reduce(
         (total, transaction) =>
-          total + transaction.amount,
+          total +
+          Number(transaction.amount),
         0,
       )
-  }, [filteredTransactions])
+    }, [incomeTransactions])
 
   /*
-   * TOTAL EXPENSE
+   * =========================================
+   * PENGELUARAN
+   * =========================================
    */
-  const totalExpense = useMemo(() => {
-    return filteredTransactions
-      .filter(
+
+  const expenseTransactions =
+    useMemo(() => {
+      return filteredTransactions.filter(
         (transaction) =>
-          transaction.type === 'expense',
+          transaction.type ===
+          'expense',
       )
-      .reduce(
+    }, [filteredTransactions])
+
+  const totalExpense =
+    useMemo(() => {
+      return expenseTransactions.reduce(
         (total, transaction) =>
-          total + transaction.amount,
+          total +
+          Number(transaction.amount),
         0,
       )
-  }, [filteredTransactions])
+    }, [expenseTransactions])
 
   /*
-   * TOTAL SAVING
+   * =========================================
+   * NET PROFIT
+   * =========================================
    */
-  const totalSaving = useMemo(() => {
-    return filteredTransactions
-      .filter(
+
+  const netProfit =
+    totalIncome -
+    totalExpense
+
+  /*
+   * =========================================
+   * PROFIT MARGIN
+   * =========================================
+   */
+
+  const profitMargin =
+    totalIncome > 0
+      ? (netProfit /
+          totalIncome) *
+        100
+      : 0
+
+  /*
+   * =========================================
+   * SAVING
+   * =========================================
+   */
+
+  const savingTransactions =
+    useMemo(() => {
+      return filteredTransactions.filter(
         (transaction) =>
-          transaction.type === 'saving',
+          transaction.type ===
+          'saving',
       )
-      .reduce(
+    }, [filteredTransactions])
+
+  const totalSaving =
+    useMemo(() => {
+      return savingTransactions.reduce(
         (total, transaction) =>
-          total + transaction.amount,
+          total +
+          Number(transaction.amount),
         0,
       )
-  }, [filteredTransactions])
-
-  const netProfit = totalIncome - totalExpense
+    }, [savingTransactions])
 
   /*
-   * EXPENSE CATEGORIES
+   * =========================================
+   * TRANSACTION COUNT
+   * =========================================
    */
-  const expenseCategories = useMemo(() => {
-    const categories: Record<
-      string,
-      number
-    > = {}
 
-    filteredTransactions
-      .filter(
-        (transaction) =>
-          transaction.type === 'expense',
-      )
-      .forEach((transaction) => {
-        let category = 'Lainnya'
-
-        const title =
-          transaction.title.toLowerCase()
-
-        if (
-          title.includes('pln') ||
-          title.includes('listrik')
-        ) {
-          category = 'Utilitas'
-        } else if (
-          title.includes('stok') ||
-          title.includes('barang') ||
-          title.includes('belanja')
-        ) {
-          category = 'Stok Barang'
-        } else if (
-          title.includes('transport') ||
-          title.includes('bensin') ||
-          title.includes('ojek')
-        ) {
-          category = 'Transportasi'
-        } else if (
-          title.includes('gaji') ||
-          title.includes('karyawan')
-        ) {
-          category = 'Karyawan'
-        }
-
-        categories[category] =
-          (categories[category] || 0) +
-          transaction.amount
-      })
-
-    return Object.entries(categories)
-      .map(([name, amount]) => ({
-        name,
-        amount,
-      }))
-      .sort((a, b) => b.amount - a.amount)
-  }, [filteredTransactions])
+  const transactionCount =
+    filteredTransactions.length
 
   /*
-   * CHART DATA
+   * =========================================
+   * AVERAGE TRANSACTION
+   * =========================================
    */
-  const chartData = useMemo(() => {
-    return [...filteredTransactions]
-      .sort((a, b) => {
-        const dateA = a.createdAt
-          ? new Date(a.createdAt).getTime()
-          : 0
 
-        const dateB = b.createdAt
-          ? new Date(b.createdAt).getTime()
-          : 0
-
-        return dateA - dateB
-      })
-      .slice(-7)
-  }, [filteredTransactions])
-
-  const chartMax = Math.max(
-    ...chartData.map((item) => item.amount),
-    1,
-  )
+  const averageTransaction =
+    transactionCount > 0
+      ? Math.round(
+          filteredTransactions.reduce(
+            (total, transaction) =>
+              total +
+              Number(
+                transaction.amount,
+              ),
+            0,
+          ) /
+            transactionCount,
+        )
+      : 0
 
   /*
-   * BACKUP
+   * =========================================
+   * LATEST TRANSACTIONS
+   * =========================================
    */
-  const createBackup = (): BackupData => {
-    return {
+
+  const latestTransactions =
+    useMemo(() => {
+      return [
+        ...filteredTransactions,
+      ]
+        .sort(
+          (a, b) => {
+            const dateA =
+              new Date(
+                a.createdAt ||
+                  `${a.date}T${a.time || '00:00'}:00`,
+              ).getTime()
+
+            const dateB =
+              new Date(
+                b.createdAt ||
+                  `${b.date}T${b.time || '00:00'}:00`,
+              ).getTime()
+
+            return dateB - dateA
+          },
+        )
+        .slice(0, 10)
+    }, [filteredTransactions])
+
+  /*
+   * =========================================
+   * EXPORT BACKUP
+   * =========================================
+   */
+
+  const handleBackup = () => {
+    const backup: BackupData = {
       app: 'CatatToko',
-      version: '1.0',
-      exportedAt: new Date().toISOString(),
+      version: '1.0.0',
+      exportedAt:
+        new Date().toISOString(),
       store: data.store,
       balance,
       transactions,
       products,
     }
-  }
 
-  const downloadBackup = () => {
-    const backup = createBackup()
-
-    const json = JSON.stringify(
-      backup,
-      null,
-      2,
+    const blob = new Blob(
+      [
+        JSON.stringify(
+          backup,
+          null,
+          2,
+        ),
+      ],
+      {
+        type: 'application/json',
+      },
     )
 
-    const blob = new Blob([json], {
-      type: 'application/json',
-    })
+    const url =
+      URL.createObjectURL(blob)
 
-    const url = URL.createObjectURL(blob)
-
-    const link = document.createElement('a')
-
-    const date = new Date()
-      .toISOString()
-      .slice(0, 10)
+    const link =
+      document.createElement('a')
 
     link.href = url
-    link.download = `catattoko-backup-${date}.json`
+
+    link.download =
+      `catattoko-backup-${new Date()
+        .toISOString()
+        .slice(0, 10)}.json`
 
     document.body.appendChild(link)
 
@@ -271,77 +356,29 @@ function Laporan({ onNavigate }: LaporanProps) {
     document.body.removeChild(link)
 
     URL.revokeObjectURL(url)
-
-    setRestoreMessage(
-      'Backup berhasil dibuat dan disimpan ke perangkat.',
-    )
-
-    setRestoreError('')
   }
 
   /*
-   * BUKA FILE RESTORE
+   * =========================================
+   * RESTORE BACKUP
+   * =========================================
    */
-  const openRestorePicker = () => {
+
+  const handleRestoreClick = () => {
     setRestoreMessage('')
     setRestoreError('')
-
     fileInputRef.current?.click()
   }
 
-  /*
-   * VALIDASI BACKUP
-   */
-  const validateBackup = (
-    backup: unknown,
-  ): backup is BackupData => {
-    if (
-      !backup ||
-      typeof backup !== 'object'
-    ) {
-      return false
-    }
-
-    const item =
-      backup as Partial<BackupData>
-
-    if (
-      item.app !== 'CatatToko'
-    ) {
-      return false
-    }
-
-    if (
-      typeof item.balance !== 'number'
-    ) {
-      return false
-    }
-
-    if (
-      !Array.isArray(item.transactions)
-    ) {
-      return false
-    }
-
-    if (
-      !Array.isArray(item.products)
-    ) {
-      return false
-    }
-
-    return true
-  }
-
-  /*
-   * RESTORE FILE
-   */
   const handleRestoreFile = async (
-    event: React.ChangeEvent<HTMLInputElement>,
+    event: ChangeEvent<HTMLInputElement>,
   ) => {
     const file =
       event.target.files?.[0]
 
-    if (!file) return
+    if (!file) {
+      return
+    }
 
     setRestoreMessage('')
     setRestoreError('')
@@ -350,1295 +387,799 @@ function Laporan({ onNavigate }: LaporanProps) {
       const text =
         await file.text()
 
-      const backup: unknown =
-        JSON.parse(text)
+      const parsed =
+        JSON.parse(text) as Partial<BackupData>
 
-      if (!validateBackup(backup)) {
+      if (
+        !parsed ||
+        typeof parsed !==
+          'object'
+      ) {
         throw new Error(
-          'Format backup tidak valid.',
+          'Format file tidak valid.',
         )
       }
 
-      const confirmed =
-        window.confirm(
-          `Restore data dari backup?\n\n` +
-            `Transaksi: ${backup.transactions.length}\n` +
-            `Produk: ${backup.products.length}\n` +
-            `Saldo: ${formatRupiah(backup.balance)}\n\n` +
-            `Data saat ini akan diganti dengan data backup.`,
+      if (
+        parsed.app !==
+        'CatatToko'
+      ) {
+        throw new Error(
+          'File bukan backup CatatToko.',
         )
-
-      if (!confirmed) {
-        event.target.value = ''
-        return
       }
 
-      localStorage.setItem(
-        'catatTokoBalance',
-        String(backup.balance),
+      if (
+        !Array.isArray(
+          parsed.transactions,
+        )
+      ) {
+        throw new Error(
+          'Data transaksi dalam backup tidak valid.',
+        )
+      }
+
+      if (
+        !Array.isArray(
+          parsed.products,
+        )
+      ) {
+        throw new Error(
+          'Data produk dalam backup tidak valid.',
+        )
+      }
+
+      const restoredTransactions =
+        parsed.transactions.map(
+          (transaction) => ({
+            ...transaction,
+            amount:
+              Number(
+                transaction.amount,
+              ) || 0,
+          }),
+        )
+
+      const restoredProducts =
+        parsed.products.map(
+          (product) => ({
+            ...product,
+            price:
+              Number(
+                product.price,
+              ) || 0,
+            stock: Math.max(
+              0,
+              Number(
+                product.stock,
+              ) || 0,
+            ),
+          }),
+        )
+
+      const restoredBalance =
+        Number(
+          parsed.balance,
+        ) || 0
+
+      saveTransactions(
+        restoredTransactions,
       )
 
-      localStorage.setItem(
-        'catatTokoTransactions',
-        JSON.stringify(
-          backup.transactions,
-        ),
+      saveProducts(
+        restoredProducts,
       )
 
-      localStorage.setItem(
-        'catatTokoProducts',
-        JSON.stringify(
-          backup.products,
-        ),
-      )
-
-      window.dispatchEvent(
-        new Event('catatTokoDataChanged'),
+      saveBalance(
+        restoredBalance,
       )
 
       loadData()
 
       setRestoreMessage(
-        'Restore berhasil. Semua data sudah dipulihkan.',
+        'Backup berhasil dipulihkan.',
       )
     } catch (error) {
-      console.error(error)
+      console.error(
+        'Gagal restore backup:',
+        error,
+      )
 
       setRestoreError(
-        'File backup tidak bisa dipulihkan. Pastikan file berasal dari CatatToko.',
+        error instanceof Error
+          ? error.message
+          : 'Gagal memulihkan backup.',
       )
+    } finally {
+      event.target.value = ''
+    }
+  }
+
+  /*
+   * =========================================
+   * HELPERS
+   * =========================================
+   */
+
+  const getTransactionIcon = (
+    type: Transaction['type'],
+  ) => {
+    if (
+      type === 'income'
+    ) {
+      return '↗'
     }
 
-    event.target.value = ''
+    if (
+      type === 'expense'
+    ) {
+      return '↘'
+    }
+
+    return '◎'
   }
 
-  /*
-   * RESET MESSAGE
-   */
-  const closeBackupMessage = () => {
-    setRestoreMessage('')
-    setRestoreError('')
+  const getTransactionStyle = (
+    type: Transaction['type'],
+  ) => {
+    if (
+      type === 'income'
+    ) {
+      return {
+        icon:
+          'bg-emerald-50 text-emerald-600',
+        amount:
+          'text-emerald-600',
+      }
+    }
+
+    if (
+      type === 'expense'
+    ) {
+      return {
+        icon:
+          'bg-red-50 text-red-600',
+        amount:
+          'text-red-600',
+      }
+    }
+
+    return {
+      icon:
+        'bg-blue-50 text-blue-600',
+      amount:
+        'text-blue-600',
+    }
   }
 
+  const getTransactionLabel = (
+    type: Transaction['type'],
+  ) => {
+    if (
+      type === 'income'
+    ) {
+      return 'Pemasukan'
+    }
+
+    if (
+      type === 'expense'
+    ) {
+      return 'Pengeluaran'
+    }
+
+    return 'Tabungan'
+  }
+
+  const periodLabel =
+    PERIOD_OPTIONS.find(
+      (item) =>
+        item.value ===
+        period,
+    )?.label ||
+    'Bulan Ini'
+
   /*
-   * LABEL PERIOD
+   * =========================================
+   * RENDER
+   * =========================================
    */
-  const periodLabel = {
-    today: 'Hari Ini',
-    week: 'Minggu Ini',
-    month: 'Bulan Ini',
-    all: 'Semua Data',
-  }[period]
 
   return (
-    <>
-      <style>{`
-        .laporan-page {
-          min-height: 100vh;
-          padding: 30px;
-          background:
-            radial-gradient(
-              circle at top right,
-              rgba(37, 99, 235, 0.07),
-              transparent 30%
-            ),
-            #f8fafc;
-          color: #0f172a;
-        }
-
-        .laporan-container {
-          width: 100%;
-          max-width: 1500px;
-          margin: 0 auto;
-        }
-
-        .laporan-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 20px;
-          margin-bottom: 22px;
-        }
-
-        .header-left {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-
-        .back-button {
-          width: 40px;
-          height: 40px;
-          display: grid;
-          place-items: center;
-          border: 1px solid #e2e8f0;
-          border-radius: 12px;
-          background: #ffffff;
-          color: #475569;
-          cursor: pointer;
-          font-size: 16px;
-          transition: 0.2s ease;
-        }
-
-        .back-button:hover {
-          transform: translateX(-2px);
-          border-color: #bfdbfe;
-          background: #eff6ff;
-          color: #2563eb;
-        }
-
-        .page-title {
-          margin: 0;
-          font-size: 28px;
-          font-weight: 900;
-          letter-spacing: -0.035em;
-        }
-
-        .page-subtitle {
-          margin: 5px 0 0;
-          color: #64748b;
-          font-size: 11px;
-        }
-
-        .header-actions {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-
-        .backup-button {
-          display: inline-flex;
-          align-items: center;
-          gap: 7px;
-          min-height: 40px;
-          padding: 0 13px;
-          border: 1px solid #dbeafe;
-          border-radius: 11px;
-          background: #eff6ff;
-          color: #2563eb;
-          cursor: pointer;
-          font-size: 10px;
-          font-weight: 850;
-        }
-
-        .backup-button:hover {
-          background: #dbeafe;
-        }
-
-        .primary-button {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          gap: 7px;
-          min-height: 40px;
-          padding: 0 14px;
-          border: none;
-          border-radius: 11px;
-          background: linear-gradient(
-            135deg,
-            #2563eb,
-            #4f46e5
-          );
-          color: #ffffff;
-          cursor: pointer;
-          font-size: 10px;
-          font-weight: 850;
-          box-shadow:
-            0 7px 17px rgba(37, 99, 235, 0.18);
-        }
-
-        .primary-button:hover {
-          transform: translateY(-1px);
-        }
-
-        .period-bar {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 15px;
-          margin-bottom: 18px;
-          padding: 5px;
-          border: 1px solid #e2e8f0;
-          border-radius: 13px;
-          background: #ffffff;
-        }
-
-        .period-buttons {
-          display: flex;
-          gap: 4px;
-        }
-
-        .period-button {
-          min-height: 34px;
-          padding: 0 12px;
-          border: none;
-          border-radius: 9px;
-          background: transparent;
-          color: #64748b;
-          cursor: pointer;
-          font-size: 10px;
-          font-weight: 800;
-        }
-
-        .period-button:hover {
-          background: #eff6ff;
-          color: #2563eb;
-        }
-
-        .period-button.active {
-          background: #2563eb;
-          color: #ffffff;
-        }
-
-        .period-info {
-          padding-right: 10px;
-          color: #94a3b8;
-          font-size: 9px;
-          font-weight: 700;
-        }
-
-        .summary-grid {
-          display: grid;
-          grid-template-columns:
-            repeat(4, minmax(0, 1fr));
-          gap: 15px;
-          margin-bottom: 18px;
-        }
-
-        .summary-card {
-          padding: 18px;
-          border: 1px solid #e2e8f0;
-          border-radius: 17px;
-          background: #ffffff;
-          box-shadow:
-            0 8px 24px rgba(15, 23, 42, 0.04);
-        }
-
-        .summary-label {
-          margin: 0;
-          color: #64748b;
-          font-size: 9px;
-          font-weight: 800;
-        }
-
-        .summary-value {
-          margin: 9px 0 0;
-          color: #0f172a;
-          font-size: 19px;
-          font-weight: 900;
-          letter-spacing: -0.025em;
-        }
-
-        .summary-note {
-          margin: 5px 0 0;
-          color: #94a3b8;
-          font-size: 8px;
-        }
-
-        .main-grid {
-          display: grid;
-          grid-template-columns:
-            minmax(0, 1.3fr)
-            minmax(300px, 0.7fr);
-          gap: 18px;
-          margin-bottom: 18px;
-        }
-
-        .panel {
-          overflow: hidden;
-          border: 1px solid #e2e8f0;
-          border-radius: 19px;
-          background: #ffffff;
-          box-shadow:
-            0 8px 25px rgba(15, 23, 42, 0.045);
-        }
-
-        .panel-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 15px;
-          padding: 18px 20px 12px;
-        }
-
-        .panel-title {
-          margin: 0;
-          font-size: 14px;
-          font-weight: 900;
-        }
-
-        .panel-subtitle {
-          margin: 4px 0 0;
-          color: #94a3b8;
-          font-size: 9px;
-        }
-
-        .chart {
-          display: flex;
-          align-items: flex-end;
-          gap: 12px;
-          height: 250px;
-          padding: 25px 20px 20px;
-        }
-
-        .bar-column {
-          min-width: 0;
-          flex: 1;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: flex-end;
-          height: 100%;
-          gap: 7px;
-        }
-
-        .bar-value {
-          color: #64748b;
-          font-size: 7px;
-          font-weight: 800;
-          white-space: nowrap;
-        }
-
-        .bar-track {
-          width: 100%;
-          max-width: 45px;
-          height: 170px;
-          display: flex;
-          align-items: flex-end;
-          border-radius: 9px 9px 4px 4px;
-          background: #f1f5f9;
-          overflow: hidden;
-        }
-
-        .bar {
-          width: 100%;
-          min-height: 5px;
-          border-radius: 9px 9px 4px 4px;
-          background: linear-gradient(
-            180deg,
-            #3b82f6,
-            #2563eb
-          );
-          transition: height 0.4s ease;
-        }
-
-        .bar-label {
-          max-width: 48px;
-          overflow: hidden;
-          color: #94a3b8;
-          font-size: 7px;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-
-        .category-list {
-          padding: 3px 20px 17px;
-        }
-
-        .category-row {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 12px 0;
-          border-bottom: 1px solid #f1f5f9;
-        }
-
-        .category-row:last-child {
-          border-bottom: none;
-        }
-
-        .category-dot {
-          width: 8px;
-          height: 8px;
-          flex: 0 0 8px;
-          border-radius: 50%;
-          background: #2563eb;
-        }
-
-        .category-info {
-          min-width: 0;
-          flex: 1;
-        }
-
-        .category-name {
-          margin: 0;
-          color: #334155;
-          font-size: 10px;
-          font-weight: 800;
-        }
-
-        .category-percent {
-          margin: 3px 0 0;
-          color: #94a3b8;
-          font-size: 8px;
-        }
-
-        .category-amount {
-          color: #1e293b;
-          font-size: 10px;
-          font-weight: 850;
-        }
-
-        .transaction-panel {
-          margin-bottom: 18px;
-        }
-
-        .transaction-table-wrapper {
-          width: 100%;
-          overflow-x: auto;
-        }
-
-        .transaction-table {
-          width: 100%;
-          min-width: 700px;
-          border-collapse: collapse;
-        }
-
-        .transaction-table th {
-          padding: 11px 20px;
-          border-top: 1px solid #f1f5f9;
-          border-bottom: 1px solid #f1f5f9;
-          color: #94a3b8;
-          font-size: 8px;
-          font-weight: 850;
-          text-align: left;
-          text-transform: uppercase;
-        }
-
-        .transaction-table td {
-          padding: 12px 20px;
-          border-bottom: 1px solid #f1f5f9;
-          font-size: 9px;
-        }
-
-        .transaction-table tr:last-child td {
-          border-bottom: none;
-        }
-
-        .type-badge {
-          display: inline-flex;
-          padding: 5px 8px;
-          border-radius: 99px;
-          font-size: 7px;
-          font-weight: 900;
-        }
-
-        .backup-panel {
-          margin-bottom: 18px;
-        }
-
-        .backup-content {
-          display: grid;
-          grid-template-columns:
-            minmax(0, 1fr)
-            minmax(280px, 0.8fr);
-          gap: 18px;
-          padding: 3px 20px 20px;
-        }
-
-        .backup-card {
-          padding: 18px;
-          border: 1px solid #e2e8f0;
-          border-radius: 15px;
-          background: #f8fafc;
-        }
-
-        .backup-card-icon {
-          width: 38px;
-          height: 38px;
-          display: grid;
-          place-items: center;
-          margin-bottom: 10px;
-          border-radius: 11px;
-          background: #eff6ff;
-          font-size: 17px;
-        }
-
-        .backup-card-title {
-          margin: 0;
-          color: #1e293b;
-          font-size: 12px;
-          font-weight: 900;
-        }
-
-        .backup-card-text {
-          margin: 6px 0 14px;
-          color: #64748b;
-          font-size: 9px;
-          line-height: 1.6;
-        }
-
-        .backup-stats {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 6px;
-          margin-bottom: 14px;
-        }
-
-        .backup-stat {
-          padding: 5px 8px;
-          border-radius: 8px;
-          background: #ffffff;
-          color: #475569;
-          font-size: 8px;
-          font-weight: 800;
-        }
-
-        .message {
-          margin: 0 20px 18px;
-          padding: 11px 13px;
-          border: 1px solid #bbf7d0;
-          border-radius: 11px;
-          background: #f0fdf4;
-          color: #15803d;
-          font-size: 9px;
-          font-weight: 750;
-        }
-
-        .error {
-          margin: 0 20px 18px;
-          padding: 11px 13px;
-          border: 1px solid #fecaca;
-          border-radius: 11px;
-          background: #fef2f2;
-          color: #dc2626;
-          font-size: 9px;
-          font-weight: 750;
-        }
-
-        .empty {
-          padding: 45px 20px;
-          color: #94a3b8;
-          font-size: 10px;
-          text-align: center;
-        }
-
-        .footer {
-          padding: 10px 0 20px;
-          color: #94a3b8;
-          font-size: 8px;
-          text-align: center;
-        }
-
-        @media (max-width: 1000px) {
-          .summary-grid {
-            grid-template-columns:
-              repeat(2, minmax(0, 1fr));
-          }
-
-          .main-grid {
-            grid-template-columns: 1fr;
-          }
-
-          .backup-content {
-            grid-template-columns: 1fr;
-          }
-        }
-
-        @media (max-width: 700px) {
-          .laporan-page {
-            padding: 20px 14px 90px;
-          }
-
-          .laporan-header {
-            align-items: flex-start;
-          }
-
-          .header-actions {
-            flex-wrap: wrap;
-            justify-content: flex-end;
-          }
-
-          .period-bar {
-            align-items: stretch;
-            flex-direction: column;
-          }
-
-          .period-buttons {
-            width: 100%;
-          }
-
-          .period-button {
-            flex: 1;
-          }
-
-          .period-info {
-            padding: 5px 8px 8px;
-          }
-
-          .chart {
-            gap: 7px;
-            padding-left: 12px;
-            padding-right: 12px;
-          }
-
-          .bar-value {
-            font-size: 6px;
-          }
-        }
-
-        @media (max-width: 450px) {
-          .laporan-page {
-            padding-left: 10px;
-            padding-right: 10px;
-          }
-
-          .page-title {
-            font-size: 22px;
-          }
-
-          .page-subtitle {
-            font-size: 8px;
-          }
-
-          .back-button {
-            width: 36px;
-            height: 36px;
-          }
-
-          .backup-button {
-            font-size: 0;
-            width: 40px;
-            padding: 0;
-          }
-
-          .backup-button::before {
-            content: '💾';
-            font-size: 14px;
-          }
-
-          .primary-button {
-            font-size: 0;
-            width: 40px;
-            padding: 0;
-          }
-
-          .primary-button::before {
-            content: '📥';
-            font-size: 14px;
-          }
-
-          .summary-card {
-            padding: 13px;
-          }
-
-          .summary-value {
-            font-size: 15px;
-          }
-
-          .panel-header {
-            padding-left: 15px;
-            padding-right: 15px;
-          }
-
-          .category-list {
-            padding-left: 15px;
-            padding-right: 15px;
-          }
-
-          .backup-content {
-            padding-left: 15px;
-            padding-right: 15px;
-          }
-        }
-      `}</style>
-
-      <main className="laporan-page">
-        <div className="laporan-container">
-
-          {/* HEADER */}
-          <header className="laporan-header">
-
-            <div className="header-left">
-              <button
-                className="back-button"
-                onClick={() =>
-                  onNavigate?.('dashboard')
-                }
-              >
-                ←
-              </button>
+    <main className="min-h-screen bg-slate-50 px-4 py-6 pb-28 text-slate-900 sm:px-6 sm:py-8 lg:px-8">
+      <div className="mx-auto w-full max-w-7xl">
+
+        <header className="mb-7 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+
+          <div>
+            <div className="mb-3 flex items-center gap-2">
+              <span className="rounded-full bg-blue-50 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-blue-600">
+                CatatToko
+              </span>
+
+              <span className="text-xs text-slate-400">
+                Laporan
+              </span>
+            </div>
+
+            <h1 className="text-3xl font-black tracking-tight sm:text-4xl">
+              Laporan Keuangan
+            </h1>
+
+            <p className="mt-2 text-sm text-slate-500 sm:text-base">
+              Pantau pemasukan,
+              pengeluaran, dan
+              perkembangan toko.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                setShowBackup(
+                  (value) =>
+                    !value,
+                )
+              }
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-black text-slate-700 shadow-sm transition hover:bg-slate-100"
+            >
+              Backup & Restore
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                onNavigate?.(
+                  'transactions',
+                )
+              }
+              className="rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-black text-white shadow-sm transition hover:bg-slate-800"
+            >
+              Lihat Transaksi →
+            </button>
+          </div>
+
+        </header>
+
+        {showBackup && (
+          <section className="mb-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+
+            <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
 
               <div>
-                <h1 className="page-title">
-                  Laporan
-                </h1>
-
-                <p className="page-subtitle">
-                  Analisis keuangan Toko Berkah Jaya.
+                <p className="text-xs font-black uppercase tracking-wider text-blue-600">
+                  Data Toko
                 </p>
-              </div>
-            </div>
 
-            <div className="header-actions">
-
-              <button
-                className="backup-button"
-                onClick={() =>
-                  setShowBackup(!showBackup)
-                }
-              >
-                💾 Backup
-              </button>
-
-              <button
-                className="primary-button"
-                onClick={openRestorePicker}
-              >
-                📥 Restore
-              </button>
-
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".json,application/json"
-                style={{ display: 'none' }}
-                onChange={handleRestoreFile}
-              />
-
-            </div>
-          </header>
-
-          {/* PERIOD */}
-          <section className="period-bar">
-
-            <div className="period-buttons">
-
-              {(
-                [
-                  ['today', 'Hari Ini'],
-                  ['week', 'Minggu Ini'],
-                  ['month', 'Bulan Ini'],
-                  ['all', 'Semua'],
-                ] as [ReportPeriod, string][]
-              ).map(([value, label]) => (
-                <button
-                  key={value}
-                  className={`period-button ${
-                    period === value
-                      ? 'active'
-                      : ''
-                  }`}
-                  onClick={() =>
-                    setPeriod(value)
-                  }
-                >
-                  {label}
-                </button>
-              ))}
-
-            </div>
-
-            <div className="period-info">
-              Periode: {periodLabel}
-            </div>
-
-          </section>
-
-          {/* SUMMARY */}
-          <section className="summary-grid">
-
-            <article className="summary-card">
-              <p className="summary-label">
-                TOTAL PEMASUKAN
-              </p>
-
-              <p
-                className="summary-value"
-                style={{ color: '#059669' }}
-              >
-                {formatRupiah(totalIncome)}
-              </p>
-
-              <p className="summary-note">
-                {filteredTransactions.filter(
-                  (item) =>
-                    item.type === 'income',
-                ).length}{' '}
-                transaksi
-              </p>
-            </article>
-
-            <article className="summary-card">
-              <p className="summary-label">
-                TOTAL PENGELUARAN
-              </p>
-
-              <p
-                className="summary-value"
-                style={{ color: '#dc2626' }}
-              >
-                {formatRupiah(totalExpense)}
-              </p>
-
-              <p className="summary-note">
-                {filteredTransactions.filter(
-                  (item) =>
-                    item.type === 'expense',
-                ).length}{' '}
-                transaksi
-              </p>
-            </article>
-
-            <article className="summary-card">
-              <p className="summary-label">
-                NET PROFIT
-              </p>
-
-              <p
-                className="summary-value"
-                style={{
-                  color:
-                    netProfit >= 0
-                      ? '#2563eb'
-                      : '#dc2626',
-                }}
-              >
-                {formatRupiah(netProfit)}
-              </p>
-
-              <p className="summary-note">
-                Pemasukan − Pengeluaran
-              </p>
-            </article>
-
-            <article className="summary-card">
-              <p className="summary-label">
-                TABUNGAN
-              </p>
-
-              <p
-                className="summary-value"
-                style={{ color: '#6366f1' }}
-              >
-                {formatRupiah(totalSaving)}
-              </p>
-
-              <p className="summary-note">
-                Saldo sekarang{' '}
-                {formatRupiah(balance)}
-              </p>
-            </article>
-
-          </section>
-
-          {/* CHART + CATEGORIES */}
-          <section className="main-grid">
-
-            {/* CHART */}
-            <article className="panel">
-
-              <div className="panel-header">
-                <div>
-                  <h2 className="panel-title">
-                    Aktivitas Keuangan
-                  </h2>
-
-                  <p className="panel-subtitle">
-                    Data transaksi nyata dari CatatToko.
-                  </p>
-                </div>
-              </div>
-
-              {chartData.length === 0 ? (
-                <div className="empty">
-                  Belum ada transaksi pada periode ini.
-                </div>
-              ) : (
-                <div className="chart">
-                  {chartData.map(
-                    (transaction) => {
-                      const height =
-                        Math.max(
-                          (transaction.amount /
-                            chartMax) *
-                            100,
-                          5,
-                        )
-
-                      const color =
-                        transaction.type ===
-                        'income'
-                          ? '#059669'
-                          : transaction.type ===
-                              'expense'
-                            ? '#dc2626'
-                            : '#6366f1'
-
-                      return (
-                        <div
-                          className="bar-column"
-                          key={transaction.id}
-                        >
-                          <span
-                            className="bar-value"
-                            style={{
-                              color,
-                            }}
-                          >
-                            {formatRupiah(
-                              transaction.amount,
-                            )}
-                          </span>
-
-                          <div className="bar-track">
-                            <div
-                              className="bar"
-                              style={{
-                                height: `${height}%`,
-                                background: color,
-                              }}
-                            />
-                          </div>
-
-                          <span className="bar-label">
-                            {transaction.title}
-                          </span>
-                        </div>
-                      )
-                    },
-                  )}
-                </div>
-              )}
-
-            </article>
-
-            {/* CATEGORY */}
-            <article className="panel">
-
-              <div className="panel-header">
-                <div>
-                  <h2 className="panel-title">
-                    Pengeluaran
-                  </h2>
-
-                  <p className="panel-subtitle">
-                    Berdasarkan kategori transaksi.
-                  </p>
-                </div>
-              </div>
-
-              {expenseCategories.length === 0 ? (
-                <div className="empty">
-                  Belum ada pengeluaran.
-                </div>
-              ) : (
-                <div className="category-list">
-                  {expenseCategories.map(
-                    (category) => {
-                      const percentage =
-                        totalExpense > 0
-                          ? Math.round(
-                              (category.amount /
-                                totalExpense) *
-                                100,
-                            )
-                          : 0
-
-                      return (
-                        <div
-                          className="category-row"
-                          key={category.name}
-                        >
-                          <span className="category-dot" />
-
-                          <div className="category-info">
-                            <p className="category-name">
-                              {category.name}
-                            </p>
-
-                            <p className="category-percent">
-                              {percentage}% dari total
-                            </p>
-                          </div>
-
-                          <span className="category-amount">
-                            {formatRupiah(
-                              category.amount,
-                            )}
-                          </span>
-                        </div>
-                      )
-                    },
-                  )}
-                </div>
-              )}
-
-            </article>
-
-          </section>
-
-          {/* TRANSACTIONS */}
-          <section className="panel transaction-panel">
-
-            <div className="panel-header">
-              <div>
-                <h2 className="panel-title">
-                  Detail Transaksi
+                <h2 className="mt-1 text-lg font-black">
+                  Backup & Restore
                 </h2>
 
-                <p className="panel-subtitle">
-                  {filteredTransactions.length}{' '}
-                  transaksi pada {periodLabel}.
+                <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
+                  Simpan data CatatToko
+                  ke file JSON atau
+                  pulihkan kembali dari
+                  file backup sebelumnya.
                 </p>
               </div>
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={
+                    handleBackup
+                  }
+                  className="rounded-xl bg-blue-600 px-4 py-3 text-xs font-black text-white transition hover:bg-blue-700"
+                >
+                  Download Backup
+                </button>
+
+                <button
+                  type="button"
+                  onClick={
+                    handleRestoreClick
+                  }
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs font-black text-slate-700 transition hover:bg-slate-50"
+                >
+                  Restore Backup
+                </button>
+
+                <input
+                  ref={
+                    fileInputRef
+                  }
+                  type="file"
+                  accept=".json,application/json"
+                  onChange={
+                    handleRestoreFile
+                  }
+                  className="hidden"
+                />
+              </div>
+
             </div>
 
-            {filteredTransactions.length === 0 ? (
-              <div className="empty">
-                Belum ada transaksi.
+            {restoreMessage && (
+              <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700">
+                {restoreMessage}
               </div>
-            ) : (
-              <div className="transaction-table-wrapper">
-                <table className="transaction-table">
-                  <thead>
-                    <tr>
-                      <th>Transaksi</th>
-                      <th>Tanggal</th>
-                      <th>Waktu</th>
-                      <th>Tipe</th>
-                      <th>Jumlah</th>
-                    </tr>
-                  </thead>
+            )}
 
-                  <tbody>
-                    {[...filteredTransactions]
-                      .sort((a, b) => {
-                        const dateA =
-                          a.createdAt
-                            ? new Date(
-                                a.createdAt,
-                              ).getTime()
-                            : 0
-
-                        const dateB =
-                          b.createdAt
-                            ? new Date(
-                                b.createdAt,
-                              ).getTime()
-                            : 0
-
-                        return dateB - dateA
-                      })
-                      .map((transaction) => {
-
-                        const type =
-                          transaction.type
-
-                        const color =
-                          type === 'income'
-                            ? '#059669'
-                            : type === 'expense'
-                              ? '#dc2626'
-                              : '#6366f1'
-
-                        const background =
-                          type === 'income'
-                            ? '#ecfdf5'
-                            : type === 'expense'
-                              ? '#fef2f2'
-                              : '#eef2ff'
-
-                        const label =
-                          type === 'income'
-                            ? 'Pemasukan'
-                            : type === 'expense'
-                              ? 'Pengeluaran'
-                              : 'Tabungan'
-
-                        return (
-                          <tr
-                            key={transaction.id}
-                          >
-                            <td
-                              style={{
-                                fontWeight: 800,
-                              }}
-                            >
-                              {transaction.title}
-                            </td>
-
-                            <td>
-                              {transaction.date}
-                            </td>
-
-                            <td>
-                              {transaction.time}
-                            </td>
-
-                            <td>
-                              <span
-                                className="type-badge"
-                                style={{
-                                  color,
-                                  background,
-                                }}
-                              >
-                                {label}
-                              </span>
-                            </td>
-
-                            <td
-                              style={{
-                                color,
-                                fontWeight: 850,
-                              }}
-                            >
-                              {type === 'income'
-                                ? '+'
-                                : type === 'expense'
-                                  ? '-'
-                                  : '•'}{' '}
-                              {formatRupiah(
-                                transaction.amount,
-                              )}
-                            </td>
-                          </tr>
-                        )
-                      })}
-                  </tbody>
-                </table>
+            {restoreError && (
+              <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">
+                {restoreError}
               </div>
             )}
 
           </section>
+        )}
 
-          {/* BACKUP RESTORE */}
-          {showBackup && (
-            <section className="panel backup-panel">
-
-              <div className="panel-header">
-                <div>
-                  <h2 className="panel-title">
-                    Backup & Restore
-                  </h2>
-
-                  <p className="panel-subtitle">
-                    Amankan data CatatToko di perangkatmu.
-                  </p>
-                </div>
-
-                <button
-                  className="back-button"
-                  onClick={() => {
-                    setShowBackup(false)
-                    closeBackupMessage()
-                  }}
-                  style={{
-                    width: 32,
-                    height: 32,
-                  }}
-                >
-                  ×
-                </button>
-              </div>
-
-              <div className="backup-content">
-
-                {/* BACKUP */}
-                <div className="backup-card">
-
-                  <div className="backup-card-icon">
-                    💾
-                  </div>
-
-                  <h3 className="backup-card-title">
-                    Backup Data
-                  </h3>
-
-                  <p className="backup-card-text">
-                    Simpan seluruh data CatatToko
-                    menjadi satu file JSON yang bisa
-                    kamu simpan sebagai cadangan.
-                  </p>
-
-                  <div className="backup-stats">
-                    <span className="backup-stat">
-                      💰 Saldo: {formatRupiah(balance)}
-                    </span>
-
-                    <span className="backup-stat">
-                      💸 {transactions.length} transaksi
-                    </span>
-
-                    <span className="backup-stat">
-                      📦 {products.length} produk
-                    </span>
-                  </div>
-
-                  <button
-                    className="primary-button"
-                    onClick={downloadBackup}
-                  >
-                    💾 Download Backup
-                  </button>
-
-                </div>
-
-                {/* RESTORE */}
-                <div className="backup-card">
-
-                  <div className="backup-card-icon">
-                    📥
-                  </div>
-
-                  <h3 className="backup-card-title">
-                    Restore Data
-                  </h3>
-
-                  <p className="backup-card-text">
-                    Pulihkan data dari file backup
-                    CatatToko yang sebelumnya sudah
-                    kamu simpan.
-                  </p>
-
-                  <div className="backup-stats">
-                    <span className="backup-stat">
-                      JSON Backup
-                    </span>
-
-                    <span className="backup-stat">
-                      ✓ Validasi otomatis
-                    </span>
-
-                    <span className="backup-stat">
-                      🔄 Auto Refresh
-                    </span>
-                  </div>
-
-                  <button
-                    className="backup-button"
-                    onClick={openRestorePicker}
-                  >
-                    📥 Pilih File Backup
-                  </button>
-
-                </div>
-
-              </div>
-
-              {restoreMessage && (
-                <div className="message">
-                  ✓ {restoreMessage}
-                </div>
-              )}
-
-              {restoreError && (
-                <div className="error">
-                  ⚠ {restoreError}
-                </div>
-              )}
-
-            </section>
+        <section className="mb-6 flex gap-2 overflow-x-auto pb-1">
+          {PERIOD_OPTIONS.map(
+            (option) => (
+              <button
+                key={
+                  option.value
+                }
+                type="button"
+                onClick={() =>
+                  setPeriod(
+                    option.value,
+                  )
+                }
+                className={`whitespace-nowrap rounded-xl px-4 py-2.5 text-xs font-black transition ${
+                  period ===
+                  option.value
+                    ? 'bg-slate-900 text-white'
+                    : 'bg-white text-slate-500 shadow-sm hover:bg-slate-100'
+                }`}
+              >
+                {option.label}
+              </button>
+            ),
           )}
+        </section>
 
-          <footer className="footer">
-            CatatToko • Laporan Keuangan UMKM
-          </footer>
+        <section className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
 
-        </div>
-      </main>
-    </>
+          <article className="rounded-3xl border border-emerald-100 bg-white p-5 shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-50 text-lg text-emerald-600">
+                ↗
+              </span>
+
+              <span className="rounded-full bg-emerald-50 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-emerald-600">
+                {periodLabel}
+              </span>
+            </div>
+
+            <p className="mt-5 text-xs font-bold text-slate-500">
+              Total Pemasukan
+            </p>
+
+            <p className="mt-1 text-2xl font-black text-emerald-600">
+              {formatRupiah(
+                totalIncome,
+              )}
+            </p>
+
+            <p className="mt-2 text-xs text-slate-400">
+              {incomeTransactions.length}{' '}
+              transaksi
+            </p>
+          </article>
+
+          <article className="rounded-3xl border border-red-100 bg-white p-5 shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-red-50 text-lg text-red-600">
+                ↘
+              </span>
+
+              <span className="rounded-full bg-red-50 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-red-600">
+                {periodLabel}
+              </span>
+            </div>
+
+            <p className="mt-5 text-xs font-bold text-slate-500">
+              Total Pengeluaran
+            </p>
+
+            <p className="mt-1 text-2xl font-black text-red-600">
+              {formatRupiah(
+                totalExpense,
+              )}
+            </p>
+
+            <p className="mt-2 text-xs text-slate-400">
+              {expenseTransactions.length}{' '}
+              transaksi
+            </p>
+          </article>
+
+          <article className="rounded-3xl border border-blue-100 bg-white p-5 shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-50 text-lg text-blue-600">
+                ◎
+              </span>
+
+              <span className="rounded-full bg-blue-50 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-blue-600">
+                Bersih
+              </span>
+            </div>
+
+            <p className="mt-5 text-xs font-bold text-slate-500">
+              Laba Bersih
+            </p>
+
+            <p
+              className={`mt-1 text-2xl font-black ${
+                netProfit >= 0
+                  ? 'text-blue-600'
+                  : 'text-red-600'
+              }`}
+            >
+              {formatRupiah(
+                netProfit,
+              )}
+            </p>
+
+            <p className="mt-2 text-xs text-slate-400">
+              Margin{' '}
+              {profitMargin.toFixed(
+                1,
+              )}
+              %
+            </p>
+          </article>
+
+          <article className="rounded-3xl border border-violet-100 bg-white p-5 shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-violet-50 text-lg text-violet-600">
+                ◉
+              </span>
+
+              <span className="rounded-full bg-violet-50 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-violet-600">
+                Rata-rata
+              </span>
+            </div>
+
+            <p className="mt-5 text-xs font-bold text-slate-500">
+              Rata-rata Transaksi
+            </p>
+
+            <p className="mt-1 text-2xl font-black text-violet-600">
+              {formatRupiah(
+                averageTransaction,
+              )}
+            </p>
+
+            <p className="mt-2 text-xs text-slate-400">
+              {transactionCount}{' '}
+              transaksi
+            </p>
+          </article>
+
+        </section>
+
+        <section className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
+
+          <article className="rounded-3xl bg-slate-900 p-6 text-white shadow-xl lg:col-span-2">
+
+            <div className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
+
+              <div>
+                <p className="text-xs font-black uppercase tracking-wider text-blue-300">
+                  Ringkasan
+                </p>
+
+                <h2 className="mt-2 text-2xl font-black">
+                  Kondisi Keuangan
+                </h2>
+
+                <p className="mt-2 max-w-xl text-sm leading-6 text-slate-300">
+                  Data dihitung berdasarkan
+                  transaksi yang tersimpan
+                  pada CatatToko.
+                </p>
+              </div>
+
+              <div className="rounded-2xl bg-white/10 px-5 py-4 backdrop-blur">
+                <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                  Saldo Saat Ini
+                </p>
+
+                <p className="mt-1 text-xl font-black">
+                  {formatRupiah(
+                    balance,
+                  )}
+                </p>
+              </div>
+
+            </div>
+
+            <div className="mt-7 grid grid-cols-1 gap-3 sm:grid-cols-3">
+
+              <div className="rounded-2xl bg-white/10 p-4">
+                <p className="text-xs text-slate-400">
+                  Pemasukan
+                </p>
+
+                <p className="mt-2 text-lg font-black text-emerald-300">
+                  {formatRupiah(
+                    totalIncome,
+                  )}
+                </p>
+              </div>
+
+              <div className="rounded-2xl bg-white/10 p-4">
+                <p className="text-xs text-slate-400">
+                  Pengeluaran
+                </p>
+
+                <p className="mt-2 text-lg font-black text-red-300">
+                  {formatRupiah(
+                    totalExpense,
+                  )}
+                </p>
+              </div>
+
+              <div className="rounded-2xl bg-white/10 p-4">
+                <p className="text-xs text-slate-400">
+                  Tabungan
+                </p>
+
+                <p className="mt-2 text-lg font-black text-blue-300">
+                  {formatRupiah(
+                    totalSaving,
+                  )}
+                </p>
+              </div>
+
+            </div>
+
+          </article>
+
+          <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+
+            <p className="text-xs font-black uppercase tracking-wider text-slate-400">
+              Statistik
+            </p>
+
+            <h2 className="mt-2 text-xl font-black">
+              Aktivitas
+            </h2>
+
+            <div className="mt-6 space-y-4">
+
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-sm text-slate-500">
+                  Total transaksi
+                </span>
+
+                <span className="font-black text-slate-900">
+                  {transactionCount}
+                </span>
+              </div>
+
+              <div className="h-px bg-slate-100" />
+
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-sm text-slate-500">
+                  Pemasukan
+                </span>
+
+                <span className="font-black text-emerald-600">
+                  {incomeTransactions.length}
+                </span>
+              </div>
+
+              <div className="h-px bg-slate-100" />
+
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-sm text-slate-500">
+                  Pengeluaran
+                </span>
+
+                <span className="font-black text-red-600">
+                  {expenseTransactions.length}
+                </span>
+              </div>
+
+              <div className="h-px bg-slate-100" />
+
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-sm text-slate-500">
+                  Tabungan
+                </span>
+
+                <span className="font-black text-blue-600">
+                  {savingTransactions.length}
+                </span>
+              </div>
+
+            </div>
+
+          </article>
+
+        </section>
+
+        <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+
+          <article className="rounded-3xl border border-slate-200 bg-white shadow-sm lg:col-span-2">
+
+            <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-5 py-5 sm:px-6">
+
+              <div>
+                <p className="text-xs font-black uppercase tracking-wider text-slate-400">
+                  Aktivitas
+                </p>
+
+                <h2 className="mt-1 text-lg font-black">
+                  Transaksi Terbaru
+                </h2>
+              </div>
+
+              <button
+                type="button"
+                onClick={() =>
+                  onNavigate?.(
+                    'transactions',
+                  )
+                }
+                className="text-xs font-black text-blue-600 transition hover:text-blue-700"
+              >
+                Lihat Semua
+              </button>
+
+            </div>
+
+            <div className="divide-y divide-slate-100">
+
+              {latestTransactions.length ===
+              0 ? (
+                <div className="px-6 py-12 text-center">
+                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-2xl">
+                    📊
+                  </div>
+
+                  <p className="mt-4 text-sm font-black text-slate-700">
+                    Belum ada transaksi
+                  </p>
+
+                  <p className="mt-1 text-xs leading-5 text-slate-400">
+                    Transaksi yang dibuat
+                    melalui kasir akan
+                    muncul di sini.
+                  </p>
+                </div>
+              ) : (
+                latestTransactions.map(
+                  (transaction) => {
+                    const style =
+                      getTransactionStyle(
+                        transaction.type,
+                      )
+
+                    return (
+                      <div
+                        key={
+                          transaction.id
+                        }
+                        className="flex items-center gap-4 px-5 py-4 sm:px-6"
+                      >
+
+                        <div
+                          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-lg font-black ${style.icon}`}
+                        >
+                          {getTransactionIcon(
+                            transaction.type,
+                          )}
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-black text-slate-800">
+                            {
+                              transaction.title
+                            }
+                          </p>
+
+                          <p className="mt-1 text-xs text-slate-400">
+                            {getTransactionLabel(
+                              transaction.type,
+                            )}{' '}
+                            •{' '}
+                            {transaction.date}{' '}
+                            {transaction.time
+                              ? `• ${transaction.time}`
+                              : ''}
+                          </p>
+                        </div>
+
+                        <p
+                          className={`shrink-0 text-sm font-black ${style.amount}`}
+                        >
+                          {transaction.type ===
+                          'expense'
+                            ? '-'
+                            : '+'}
+                          {formatRupiah(
+                            Number(
+                              transaction.amount,
+                            ),
+                          )}
+                        </p>
+
+                      </div>
+                    )
+                  },
+                )
+              )}
+
+            </div>
+
+          </article>
+
+          <article className="rounded-3xl border border-slate-200 bg-white shadow-sm">
+
+            <div className="border-b border-slate-100 px-5 py-5 sm:px-6">
+              <p className="text-xs font-black uppercase tracking-wider text-slate-400">
+                Produk
+              </p>
+
+              <h2 className="mt-1 text-lg font-black">
+                Stok Toko
+              </h2>
+            </div>
+
+            <div className="p-5 sm:p-6">
+
+              <div className="rounded-2xl bg-slate-50 p-4">
+                <p className="text-xs text-slate-500">
+                  Total produk
+                </p>
+
+                <p className="mt-1 text-2xl font-black text-slate-900">
+                  {products.length}
+                </p>
+              </div>
+
+              <div className="mt-4 rounded-2xl bg-red-50 p-4">
+                <p className="text-xs text-red-500">
+                  Stok menipis
+                </p>
+
+                <p className="mt-1 text-2xl font-black text-red-600">
+                  {
+                    products.filter(
+                      (product) =>
+                        Number(
+                          product.stock,
+                        ) <= 10,
+                    ).length
+                  }
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() =>
+                  onNavigate?.(
+                    'products',
+                  )
+                }
+                className="mt-4 w-full rounded-xl bg-slate-900 px-4 py-3 text-xs font-black text-white transition hover:bg-slate-800"
+              >
+                Kelola Produk →
+              </button>
+
+            </div>
+
+          </article>
+
+        </section>
+
+      </div>
+    </main>
   )
 }
 
