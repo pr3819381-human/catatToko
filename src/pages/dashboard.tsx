@@ -5,6 +5,7 @@ import {
 } from 'react'
 
 import {
+  addTransaction,
   DATA_CHANGED_EVENT,
   formatRupiah,
   getBalance,
@@ -34,8 +35,7 @@ const NOTIFICATION_READ_KEY =
 
 function safeGetTransactions(): Transaction[] {
   try {
-    const result =
-      getTransactions()
+    const result = getTransactions()
 
     return Array.isArray(result)
       ? result
@@ -47,8 +47,7 @@ function safeGetTransactions(): Transaction[] {
 
 function safeGetProducts(): Product[] {
   try {
-    const result =
-      getProducts()
+    const result = getProducts()
 
     return Array.isArray(result)
       ? result
@@ -60,8 +59,7 @@ function safeGetProducts(): Product[] {
 
 function safeGetBalance(): number {
   try {
-    const result =
-      getBalance()
+    const result = getBalance()
 
     return typeof result === 'number' &&
       Number.isFinite(result)
@@ -218,8 +216,7 @@ function Dashboard({
       return transactions.filter(
         (transaction) =>
           isInPeriod(
-            transaction.createdAt ||
-              transaction.date,
+            transaction.date,
             period,
           ),
       )
@@ -519,6 +516,22 @@ function Dashboard({
       )
     }
 
+  const handleDemoIncome = () => {
+    try {
+      addTransaction({
+        title:
+          'Pemasukan Cepat',
+        type: 'income',
+        amount: 100000,
+      })
+    } catch (error) {
+      console.error(
+        'Gagal membuat transaksi:',
+        error,
+      )
+    }
+  }
+
   const periodLabel =
     {
       today: 'Hari Ini',
@@ -544,13 +557,8 @@ function Dashboard({
               </span>
             </div>
 
-            <h1 className="text-3xl font-black tracking-tight sm:text-4xl">
-              Halo, Putra 👋
-            </h1>
-
-            <p className="mt-2 text-sm text-slate-500 sm:text-base">
-              Kelola Toko Berkah Jaya
-              dengan lebih mudah.
+            <p className="text-sm text-slate-500 sm:text-base">
+              Kelola toko dengan lebih mudah.
             </p>
           </div>
 
@@ -856,7 +864,6 @@ function Dashboard({
         <section className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
 
           <article className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
-
             <div className="flex items-center justify-between gap-4">
               <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-50 text-lg">
                 💰
@@ -876,11 +883,9 @@ function Dashboard({
                 totalIncome,
               )}
             </p>
-
           </article>
 
           <article className="rounded-2xl border border-red-100 bg-white p-5 shadow-sm">
-
             <div className="flex items-center justify-between gap-4">
               <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-red-50 text-lg">
                 💸
@@ -900,11 +905,9 @@ function Dashboard({
                 totalExpense,
               )}
             </p>
-
           </article>
 
           <article className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
-
             <div className="flex items-center justify-between gap-4">
               <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-lg">
                 📊
@@ -930,11 +933,9 @@ function Dashboard({
                 netProfit,
               )}
             </p>
-
           </article>
 
           <article className="rounded-2xl border border-violet-100 bg-white p-5 shadow-sm">
-
             <div className="flex items-center justify-between gap-4">
               <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-violet-50 text-lg">
                 🧾
@@ -952,7 +953,6 @@ function Dashboard({
             <p className="mt-1 text-xl font-black text-violet-600">
               {transactionCount}
             </p>
-
           </article>
 
         </section>
@@ -1082,7 +1082,6 @@ function Dashboard({
             {recentTransactions.length ===
             0 ? (
               <div className="flex min-h-[260px] flex-col items-center justify-center px-5 text-center">
-
                 <span className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-2xl">
                   🧾
                 </span>
@@ -1096,7 +1095,6 @@ function Dashboard({
                   atau pencatatan manual
                   akan muncul di sini.
                 </p>
-
               </div>
             ) : (
               <div className="divide-y divide-slate-100">
@@ -1131,7 +1129,6 @@ function Dashboard({
                         </span>
 
                         <div className="min-w-0 flex-1">
-
                           <p className="truncate text-xs font-black text-slate-800">
                             {
                               transaction.title
@@ -1147,7 +1144,6 @@ function Dashboard({
                               transaction.time
                             }
                           </p>
-
                         </div>
 
                         <strong
@@ -1193,7 +1189,6 @@ function Dashboard({
             {lowStockProducts.length ===
             0 ? (
               <div className="flex min-h-[220px] flex-col items-center justify-center text-center">
-
                 <span className="mb-3 text-3xl">
                   ✅
                 </span>
@@ -1206,7 +1201,6 @@ function Dashboard({
                   Belum ada produk dengan
                   stok menipis.
                 </p>
-
               </div>
             ) : (
               <div className="space-y-3">
@@ -1231,7 +1225,6 @@ function Dashboard({
                       </span>
 
                       <span className="min-w-0 flex-1">
-
                         <strong className="block truncate text-xs font-black text-slate-800">
                           {
                             product.name
@@ -1244,7 +1237,6 @@ function Dashboard({
                             product.price,
                           )}
                         </span>
-
                       </span>
 
                       <span
@@ -1323,6 +1315,33 @@ function Dashboard({
               Dana yang dicatat sebagai
               tabungan pada periode ini.
             </p>
+
+          </div>
+
+        </section>
+
+        <section className="mt-5 rounded-2xl border border-blue-100 bg-blue-50/60 p-5">
+
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+
+            <div>
+              <p className="text-xs font-black text-blue-700">
+                Butuh pencatatan cepat?
+              </p>
+
+              <p className="mt-1 text-sm text-blue-900">
+                Tambahkan transaksi manual
+                tanpa masuk ke halaman lain.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleDemoIncome}
+              className="rounded-xl bg-blue-600 px-4 py-3 text-xs font-black text-white transition hover:bg-blue-700"
+            >
+              + Contoh Pemasukan Rp100.000
+            </button>
 
           </div>
 
